@@ -1,10 +1,15 @@
 # Meshcore-Linux
 
-Linux port of the MeshCore mesh radio repeater, tunnelling all `mesh::Radio`
-operations to a remote [pymc_usb](https://github.com/itk80/pymc_usb) modem
-over TCP (wire protocol v0.7). The Linux service speaks the same protocol
-the ESP32 [TCPRadio firmware](https://github.com/itk80/MeshCore/tree/tcpradio)
-uses, with a POSIX socket adapter in place of WiFiClient.
+Linux port of the MeshCore mesh radio repeater. The service has no on-host
+LoRa peripheral: all `mesh::Radio` operations are tunnelled over TCP (wire
+protocol v0.7) to a remote modem.
+
+> **Remote modem requirement.** The TCP-reachable radio MUST be running
+> firmware from the [**pymc_usb**](https://github.com/itk80/pymc_usb)
+> project (any board variant — Heltec V3, Lilygo T3S3, RAK3112, …, as long
+> as the firmware is built from `pymc_usb`). No other modem firmware is
+> supported; the protocol details (framing, CRC, opcode set, RX_PACKET
+> metadata layout) are bound to that firmware.
 
 ## What it is
 
