@@ -1,0 +1,27 @@
+[Unit]
+Description=MeshCore-Linux — mesh::Radio bridge over pymc_usb/pymc_tcp
+Documentation=https://github.com/itk80/MeshCore
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/meshcore-linux /etc/Meshcore-Linux/config.json
+Restart=on-failure
+RestartSec=5s
+# stdout/stderr go to systemd-journal — `journalctl -fu Meshcore-Linux` to follow.
+StandardOutput=journal
+StandardError=journal
+# Run as root for now (binds :5060 and reads/writes /etc/Meshcore-Linux/).
+# Tighten with a dedicated user + CAP_NET_BIND_SERVICE if/when we move the
+# config API to a privileged port — :5060 is unprivileged anyway, so an
+# unprivileged user works too. Reserved for follow-up.
+User=root
+# Modest hardening that's safe for a single-process TCP-only service.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/Meshcore-Linux
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

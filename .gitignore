@@ -1,0 +1,14 @@
+# Built binary
+meshcore-linux
+
+# Editor / OS noise
+*.o
+*.d
+.DS_Store
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+
+# Local-only working notes
+STATUS.md

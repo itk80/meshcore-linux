@@ -1,0 +1,24 @@
+{
+  "modem": {
+    "host": "192.168.5.2",
+    "port": 5055,
+    "token": ""
+  },
+  "node": {
+    "name": "MeshCore-Linux Repeater",
+    "admin_password": "password"
+  },
+  "lora": {
+    "freq_mhz": 869.618,
+    "bw_khz": 62.5,
+    "sf": 8,
+    "cr": 8,
+    "tx_power_dbm": 22,
+    "syncword": 18,
+    "preamble_len": 16
+  },
+  "config_api": {
+    "port": 5060,
+    "bind": "0.0.0.0"
+  }
+}
