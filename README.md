@@ -21,7 +21,12 @@ protocol v0.7) to a remote modem.
 - **`LinuxPlatform.h`** — host abstractions: `LinuxMainBoard` (stubs +
   `reboot()` exits for systemd), `LinuxMillisClock`, `LinuxRTCClock`,
   `LinuxRNG` (`getrandom(2)` with `/dev/urandom` fallback).
-- **`ConfigServer`** — HTTP/JSON API on port 5060 (cpp-httplib):
+- **`ConfigServer`** — HTTP/JSON API on port 8080 (cpp-httplib). The
+  default port is **not** 5060 even though that's what an initial spec
+  asked for: modern browsers hard-code 5060 (SIP) in their
+  [unsafe-port list](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/net/base/port_util.cc)
+  and refuse to fetch HTTP from it (`ERR_UNSAFE_PORT`). 8080 is the
+  classic alt-HTTP port and works everywhere. Endpoints:
   - `GET /` &mdash; tiny HTML editor + live status panel
   - `GET  /api/config` &mdash; current config as JSON
   - `POST /api/config` &mdash; persist + hot-apply (modem endpoint, LoRa params)

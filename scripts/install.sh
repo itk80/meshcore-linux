@@ -55,4 +55,4 @@ systemctl --no-pager --lines=15 status Meshcore-Linux.service || true
 
 echo
 echo "Done. Follow logs with:  journalctl -fu Meshcore-Linux"
-echo "Config API:              http://$(hostname -I | awk '{print $1}'):5060/"
+echo "Config API:              http://$(hostname -I | awk '{print $1}'):8080/"
