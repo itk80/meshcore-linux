@@ -245,6 +245,32 @@ void ConfigServer::route(httplib::Server& s) {
     res.set_content(j.dump(2), "application/json");
   });
 
+  s.Post("/api/command", [this](const httplib::Request& req, httplib::Response& res) {
+    if (!_cli_bridge) {
+      res.status = 503;
+      res.set_content(json{{"ok",false},{"error","no CLI bridge wired"}}.dump(),
+                      "application/json");
+      return;
+    }
+    std::string cmd;
+    try {
+      auto body = json::parse(req.body);
+      cmd = body.value("command", "");
+    } catch (...) {
+      // also accept plain text bodies for curl simplicity
+      cmd = req.body;
+    }
+    if (cmd.empty()) {
+      res.status = 400;
+      res.set_content(json{{"ok",false},{"error","empty command"}}.dump(),
+                      "application/json");
+      return;
+    }
+    std::string reply = _cli_bridge(cmd);
+    res.set_content(json{{"ok",true},{"command",cmd},{"reply",reply}}.dump(2),
+                    "application/json");
+  });
+
   s.Post("/api/reboot", [](const httplib::Request&, httplib::Response& res) {
     res.set_content(json{{"ok",true},{"msg","exiting — systemd will restart"}}.dump(),
                     "application/json");

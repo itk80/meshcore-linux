@@ -20,7 +20,9 @@ User=root
 # Modest hardening that's safe for a single-process TCP-only service.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/etc/Meshcore-Linux
+ReadWritePaths=/etc/Meshcore-Linux /var/lib/Meshcore-Linux
+StateDirectory=Meshcore-Linux
+StateDirectoryMode=0750
 PrivateTmp=true
 
 [Install]

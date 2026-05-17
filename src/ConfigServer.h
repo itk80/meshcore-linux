@@ -16,6 +16,7 @@
 #include "LinuxTcpRadio.h"
 #include <nlohmann_json.hpp>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -37,11 +38,18 @@ public:
   // Stats exposed via /api/status (set by main loop).
   void setUptimeStart(uint64_t epoch_secs) { _uptime_start_secs = epoch_secs; }
 
+  // CLI bridge — when set, POST /api/command {"command":"..."} forwards the
+  // command to this lambda and returns its text reply. Used to plumb the
+  // CommonCLI verbs (set freq, get neighbours, advert, etc.) over HTTP.
+  using CliBridge = std::function<std::string(const std::string&)>;
+  void setCliBridge(CliBridge fn) { _cli_bridge = std::move(fn); }
+
 private:
   LinuxTcpRadio&     _radio;
   nlohmann::json&    _live_config;     // mutable, shared with main
   std::mutex&        _config_mu;       // guards reads/writes of _live_config
   std::string        _config_path;     // /etc/Meshcore-Linux/config.json
+  CliBridge          _cli_bridge;      // optional /api/command bridge
 
   std::unique_ptr<httplib::Server> _server;
   std::thread        _thread;

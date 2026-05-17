@@ -1,26 +1,18 @@
-// MeshCore-Linux — full stack entry point.
+// MeshCore-Linux — Phase D.3 full-repeater entry point.
 //
-// Wires together:
-//   - LinuxTcpRadio   (our mesh::Radio impl, talks to a pymc_usb modem)
-//   - LinuxMesh       (mesh::Mesh subclass — boots Dispatcher + Mesh tables)
-//   - LinuxMainBoard  (mesh::MainBoard host stubs)
-//   - LinuxRTCClock   (clock_gettime/time())
-//   - LinuxRNG        (getrandom(2))
-//   - StaticPoolPacketManager + SimpleMeshTables (from upstream MeshCore)
-//   - ConfigServer    (HTTP/JSON config API on port 5060)
-//
-// The Mesh is currently in passive-listener mode (LinuxMesh::onRecvPacket
-// just logs + ACTION_RELEASE). Upgrading to full repeater = swap the base
-// class to BaseChatMesh and implement its hooks (same body as MyMesh.cpp
-// from the ESP32 simple_repeater example).
+// Wires:
+//   LinuxTcpRadio         (mesh::Radio impl, pymc_usb wire protocol v0.7)
+//   LinuxRepeaterMesh     (mesh::Mesh + CommonCLICallbacks impl — full repeater)
+//   LinuxMainBoard/RTC/Millis/RNG  (host abstractions)
+//   StaticPoolPacketManager + SimpleMeshTables
+//   ConfigServer           (HTTP/JSON on configurable port — default 8080)
 
 #include "LinuxTcpRadio.h"
 #include "LinuxPlatform.h"
-#include "LinuxMesh.h"
+#include "LinuxRepeaterMesh.h"
 #include "ConfigServer.h"
 
-#include <helpers/SimpleMeshTables.h>
-#include <helpers/StaticPoolPacketManager.h>
+#include <FS.h>     // FSImpl backed by /var/lib/Meshcore-Linux
 
 #include <nlohmann_json.hpp>
 
@@ -38,28 +30,21 @@
 
 using json = nlohmann::json;
 
-// ── logger ──────────────────────────────────────────────────────────
-
 static void logf(const char* level, const char* fmt, ...) {
   char tbuf[32];
   time_t now = std::time(nullptr);
   std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
   std::fprintf(stderr, "%s %s ", tbuf, level);
-  va_list ap; va_start(ap, fmt);
-  std::vfprintf(stderr, fmt, ap);
-  va_end(ap);
+  va_list ap; va_start(ap, fmt); std::vfprintf(stderr, fmt, ap); va_end(ap);
   std::fprintf(stderr, "\n");
 }
 #define LOGI(...) logf("INFO", __VA_ARGS__)
 #define LOGW(...) logf("WARN", __VA_ARGS__)
 #define LOGE(...) logf("ERR ", __VA_ARGS__)
 
-// ── helpers ─────────────────────────────────────────────────────────
-
 static std::string slurp(const std::string& path) {
   std::ifstream f(path); if (!f) return {};
-  std::stringstream ss; ss << f.rdbuf();
-  return ss.str();
+  std::stringstream ss; ss << f.rdbuf(); return ss.str();
 }
 
 template <typename T>
@@ -70,15 +55,11 @@ static T jget(const json& j, const char* ptr, T dflt) {
   } catch (...) { return dflt; }
 }
 
-// ── signal handling ─────────────────────────────────────────────────
-
 static std::atomic<bool> g_shutdown{false};
 static void on_signal(int sig) {
   logf("INFO", "signal %d received, shutting down", sig);
   g_shutdown.store(true);
 }
-
-// ── main ────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
   std::signal(SIGINT,  on_signal);
@@ -99,15 +80,16 @@ int main(int argc, char** argv) {
   if (host.empty()) { LOGE("config: missing modem.host"); return 2; }
 
   std::string api_bind = jget<std::string>(cfg, "/config_api/bind", "0.0.0.0");
-  int         api_port = jget<int>        (cfg, "/config_api/port", 5060);
+  int         api_port = jget<int>        (cfg, "/config_api/port", 8080);
+  std::string state_dir = jget<std::string>(cfg, "/state_dir", "/var/lib/Meshcore-Linux");
 
-  LOGI("MeshCore-Linux full-stack starting | modem=%s:%d | api=%s:%d",
-       host.c_str(), port, api_bind.c_str(), api_port);
+  LOGI("MeshCore-Linux full-repeater starting | modem=%s:%d | api=%s:%d | state=%s",
+       host.c_str(), port, api_bind.c_str(), api_port, state_dir.c_str());
 
   // ── Platform impls ────────────────────────────────────────────────
   LinuxMainBoard    board;
   LinuxMillisClock  ms_clock;
-  LinuxRTCClock     rtc;  rtc.begin();
+  LinuxRTCClock     rtc; rtc.begin();
   LinuxRNG          rng;
   StaticPoolPacketManager pkt_mgr(32);
   SimpleMeshTables  tables;
@@ -130,33 +112,84 @@ int main(int argc, char** argv) {
     radio.setAuthToken(buf, tlen);
   }
 
-  // ── Mesh stack ────────────────────────────────────────────────────
-  LinuxMesh mesh(radio, ms_clock, rng, rtc, pkt_mgr, tables);
-  mesh.begin();          // brings the radio up (handshake) via Dispatcher::begin
+  // ── Persistent state filesystem ───────────────────────────────────
+  FSImpl fs(state_dir);
+  if (!fs.begin()) {
+    LOGE("cannot create state dir %s — running without persistence", state_dir.c_str());
+  }
 
-  LOGI("mesh stack initialised (passive listener; full repeater behaviour"
-       " = override BaseChatMesh hooks — follow-up)");
+  // ── Mesh + Repeater ──────────────────────────────────────────────
+  LinuxRepeaterMesh mesh(board, radio, ms_clock, rng, rtc, pkt_mgr, tables);
 
-  // ── HTTP config API ───────────────────────────────────────────────
+  // Identity lives IN the JSON config (operator never has to manage it).
+  // Lazy-generated on first start, persisted atomically, preserved across
+  // reinstalls because install.sh leaves an existing config.json alone.
+  std::string id_pub = jget<std::string>(cfg, "/identity/pub", "");
+  std::string id_prv = jget<std::string>(cfg, "/identity/prv", "");
+
+  mesh.bringUp(fs, id_pub, id_prv,
+    [&cfg, &cfg_path](const std::string& pub_hex, const std::string& prv_hex) {
+      // Persist back into the live JSON + flush to disk atomically.
+      cfg["identity"]["pub"] = pub_hex;
+      cfg["identity"]["prv"] = prv_hex;
+      std::string tmp = cfg_path + ".tmp";
+      std::ofstream f(tmp);
+      if (f) {
+        f << cfg.dump(2) << "\n";
+        f.close();
+        if (std::rename(tmp.c_str(), cfg_path.c_str()) != 0) {
+          fprintf(stderr, "[main] WARNING: identity NOT persisted (rename failed); "
+                  "will be regenerated on next start\n");
+        } else {
+          fprintf(stderr, "[main] identity persisted to %s\n", cfg_path.c_str());
+        }
+      } else {
+        fprintf(stderr, "[main] WARNING: cannot write %s — identity NOT persisted\n",
+                tmp.c_str());
+      }
+    });
+
+  LOGI("repeater up; node='%s' freq=%.3fMHz sf=%u cr=%u",
+       mesh.getNodePrefs()->node_name,
+       (double)mesh.getNodePrefs()->freq,
+       (unsigned)mesh.getNodePrefs()->sf,
+       (unsigned)mesh.getNodePrefs()->cr);
+
+  // First self-advert is scheduled by bringUp() (next_local_advert = +5s),
+  // so by the time we hit the main loop tick the identity is already
+  // loaded/generated. Do NOT pre-emptively call sendSelfAdvertisement here.
+
+  // ── HTTP config API + CLI bridge ──────────────────────────────────
   std::mutex cfg_mu;
+  std::mutex mesh_mu;   // serialises HTTP-thread CLI access vs main-loop mesh.tick()
   ConfigServer api(radio, cfg, cfg_mu, cfg_path);
   api.setUptimeStart((uint64_t)std::time(nullptr));
+  api.setCliBridge([&mesh, &mesh_mu](const std::string& cmd) -> std::string {
+    static thread_local char reply[4096];
+    reply[0] = '\0';
+    std::lock_guard<std::mutex> lk(mesh_mu);
+    mesh.processCommand(cmd.c_str(), reply);
+    return std::string(reply);
+  });
   if (!api.start(api_bind, (uint16_t)api_port)) {
-    LOGW("config API failed to bind %s:%d — continuing without it",
-         api_bind.c_str(), api_port);
+    LOGW("config API failed to bind %s:%d", api_bind.c_str(), api_port);
   } else {
     LOGI("config API listening on %s:%d", api_bind.c_str(), api_port);
   }
 
   // ── Main loop ─────────────────────────────────────────────────────
   while (!g_shutdown.load()) {
-    mesh.loop();   // pumps Dispatcher (which pumps radio.loop, recvRaw etc.)
+    {
+      std::lock_guard<std::mutex> lk(mesh_mu);
+      mesh.tick();
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
 
   api.stop();
-  LOGI("clean shutdown (rx=%u tx=%u pong=%u crc=%u)",
+  LOGI("clean shutdown (rx=%u tx=%u pong=%u crc=%u, mesh sent_flood=%u recv_flood=%u)",
        radio.getRxCount(), radio.getTxCount(),
-       radio.getPongCount(), radio.getCrcErrors());
+       radio.getPongCount(), radio.getCrcErrors(),
+       (unsigned)mesh.getNumSentFlood(), (unsigned)mesh.getNumRecvFlood());
   return 0;
 }

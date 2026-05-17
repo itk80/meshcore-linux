@@ -42,19 +42,36 @@ protocol v0.7) to a remote modem.
 | Project scaffold                         | ✅ |
 | WiFiClient → POSIX socket shim           | ✅ |
 | `LinuxTcpRadio : mesh::Radio`            | ✅ |
-| `LinuxMesh` (Mesh + Dispatcher boot)     | ✅ |
-| JSON config (`/etc/Meshcore-Linux/config.json`) | ✅ |
-| HTTP config API on `:5060`               | ✅ |
-| systemd unit + install script            | ✅ |
-| **Full repeater behaviour** (BaseChatMesh subclass with `onMessageRecv`, `onDiscoveredContact`, ACL, advertisements, contacts) | ⏳ follow-up |
+| `LinuxRepeaterMesh : mesh::Mesh + CommonCLICallbacks` (full repeater) | ✅ |
+| Identity persistence in config.json (Ed25519 keypair lazy-generated, survives reinstall) | ✅ |
+| JSON config (`/etc/Meshcore-Linux/config.json`)         | ✅ |
+| HTTP config API on `:8080` + `/api/command` CLI bridge  | ✅ |
+| systemd unit + install script + `StateDirectory`        | ✅ |
 
-The currently-shipped `LinuxMesh` is a **passive listener**: it receives /
-parses / de-dups raw packets but does not advertise itself, does not route,
-and does not manage contacts. The pieces required to upgrade
-(`BaseChatMesh.cpp`, `ClientACL.cpp`, `CommonCLI.cpp`, …) are already
-compiled into the binary — the next step is to swap `LinuxMesh`'s base
-class to `BaseChatMesh` and implement its ~20 pure virtuals, mirroring
-`examples/simple_repeater/MyMesh.cpp` from upstream MeshCore.
+## Identity
+
+The repeater's Ed25519 keypair lives **inside `/etc/Meshcore-Linux/config.json`**:
+
+```json
+"identity": {
+  "pub": "<64 hex chars — Ed25519 public key>",
+  "prv": "<128 hex chars — Ed25519 secret key>"
+}
+```
+
+On first start (empty fields, or block missing) the service generates a
+fresh keypair via `getrandom(2)` and writes it back atomically. **Reinstall
+preserves the keypair**: `install.sh` never overwrites an existing
+`config.json`. Backup `/etc/Meshcore-Linux/config.json` to back up the
+repeater identity.
+
+Adverts are **disabled by default** (`advert_interval=0`) so a freshly
+seeded node never beacons before the operator has confirmed identity,
+node name, region and LoRa params are correct. Enable via CLI:
+
+```bash
+curl -X POST -d 'set advert.interval 1' http://<host>:8080/api/command
+```
 
 ## Build
 

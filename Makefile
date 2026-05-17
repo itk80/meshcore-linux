@@ -25,6 +25,7 @@ LDFLAGS  ?= -pthread
 LINUX_SRC := \
     src/main.cpp \
     src/LinuxTcpRadio.cpp \
+    src/LinuxRepeaterMesh.cpp \
     src/ConfigServer.cpp \
     shims/RNGStub.cpp
 
