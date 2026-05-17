@@ -64,6 +64,16 @@ void LinuxTcpRadio::setLoRaParams(float freq_mhz, float bw_khz, uint8_t sf, uint
   _power_dbm = power_dbm; _syncword = syncword; _preamble_len = preamble_len;
 }
 
+void LinuxTcpRadio::setParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr) {
+  _freq_mhz = freq_mhz; _bw_khz = bw_khz; _sf = sf; _cr = cr;
+  if (isConnected()) sendConfig();
+}
+
+void LinuxTcpRadio::setTxPower(int8_t power_dbm) {
+  _power_dbm = power_dbm;
+  if (isConnected()) sendConfig();
+}
+
 // ─── mesh::Radio interface ─────────────────────────────────────────────
 
 void LinuxTcpRadio::begin() {

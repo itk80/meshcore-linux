@@ -557,36 +557,42 @@ void ConfigServer::applyHotReload(const json& prev, const json& next) {
   std::string gp = sNode("/node/guest_password");
   if (!gp.empty()) cli("set guest.password " + gp);
 
-  cli("set freq " + std::to_string(json_dbl(next, "/lora/freq_mhz",   869.618)));
-  cli("set bw "   + std::to_string(json_dbl(next, "/lora/bw_khz",     62.5)));
-  cli("set sf "   + std::to_string(json_int(next, "/lora/sf",         8)));
-  cli("set cr "   + std::to_string(json_int(next, "/lora/cr",         8)));
-  cli("set tx_power " + std::to_string(json_int(next, "/lora/tx_power_dbm", 22)));
+  // LoRa params: MeshCore CLI takes all four atomically via `set radio
+  // freq,bw,sf,cr`. Individual `set bw/sf/cr` don't exist — only `set freq`
+  // is split out. We push both: `set radio` for the atomic update + `set
+  // freq` covers the case where only freq changed (older firmware paths).
+  {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "set radio %g,%g,%d,%d",
+      json_dbl(next, "/lora/freq_mhz",   869.618),
+      json_dbl(next, "/lora/bw_khz",     62.5),
+      json_int(next, "/lora/sf",         8),
+      json_int(next, "/lora/cr",         8));
+    cli(buf);
+  }
+  cli("set freq " + std::to_string(json_dbl(next, "/lora/freq_mhz",  869.618)));
+  cli("set tx "   + std::to_string(json_int(next, "/lora/tx_power_dbm", 22)));
 
   int dc = json_int(next, "/repeater/duty_cycle_pct", 50);
-  if (dc > 0 && dc <= 100) cli("set duty_cycle " + std::to_string(dc));
+  if (dc >= 1 && dc <= 100) cli("set dutycycle " + std::to_string(dc));
 
+  // CommonCLI uses dotted-key names (not underscores).
   cli("set advert.interval "       + std::to_string(json_int(next, "/repeater/advert_interval_min", 0)));
-  cli("set flood_advert.interval " + std::to_string(json_int(next, "/repeater/flood_advert_interval_h", 0)));
+  cli("set flood.advert.interval " + std::to_string(json_int(next, "/repeater/flood_advert_interval_h", 0)));
   cli("set flood.max "             + std::to_string(json_int(next, "/repeater/flood_max_hops", 64)));
-  cli("set interference.threshold "+ std::to_string(json_int(next, "/repeater/interference_threshold", 0)));
+  cli("set int.thresh "            + std::to_string(json_int(next, "/repeater/interference_threshold", 0)));
   cli("set agc.reset.interval "    + std::to_string(json_int(next, "/repeater/agc_reset_interval", 0)));
-  cli("set rx_delay_base "         + std::to_string(json_dbl(next, "/repeater/rx_delay_base", 0.0)));
-  cli("set tx_delay_factor "       + std::to_string(json_dbl(next, "/repeater/tx_delay_factor", 0.5)));
-  cli("set direct_tx_delay_factor "+ std::to_string(json_dbl(next, "/repeater/direct_tx_delay_factor", 0.3)));
-  cli(std::string("set multi_acks ") + (json_int(next, "/repeater/multi_acks", 0) ? "1" : "0"));
+  cli("set rxdelay "               + std::to_string(json_dbl(next, "/repeater/rx_delay_base", 0.0)));
+  cli("set txdelay "               + std::to_string(json_dbl(next, "/repeater/tx_delay_factor", 0.5)));
+  cli("set direct.txdelay "        + std::to_string(json_dbl(next, "/repeater/direct_tx_delay_factor", 0.3)));
+  cli(std::string("set multi.acks ") + (json_int(next, "/repeater/multi_acks", 0) ? "1" : "0"));
 
   std::string ld = sNode("/repeater/loop_detect");
-  if (!ld.empty()) cli("set loop_detect " + ld);
-  cli("set path_hash_mode " + std::to_string(json_int(next, "/repeater/path_hash_mode", 1)));
+  if (!ld.empty()) cli("set loop.detect " + ld);
+  cli("set path.hash.mode " + std::to_string(json_int(next, "/repeater/path_hash_mode", 1)));
 
   // Large mesh optimisation — when enabled, suppress periodic adverts.
   if (json_int(next, "/repeater/large_mesh_optim", 0)) cli("set advert.interval 0");
-
-  // Make sure NodePrefs hits disk now (the CLI verbs above already persist,
-  // but doesn't hurt to flush again).
-  cli("set save");   // CommonCLI defines a 'save' verb; if unrecognised the
-                     // reply is "??: save" and it's a no-op.
 }
 
 void ConfigServer::route(httplib::Server& s) {

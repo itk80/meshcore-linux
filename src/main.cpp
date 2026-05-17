@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
   std::string id_pub = jget<std::string>(cfg, "/identity/pub", "");
   std::string id_prv = jget<std::string>(cfg, "/identity/prv", "");
 
-  mesh.bringUp(fs, id_pub, id_prv,
+  auto identity_persist =
     [&cfg, &cfg_path](const std::string& pub_hex, const std::string& prv_hex) {
       // Persist back into the live JSON + flush to disk atomically.
       cfg["identity"]["pub"] = pub_hex;
@@ -147,8 +147,19 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[main] WARNING: cannot write %s — identity NOT persisted\n",
                 tmp.c_str());
       }
-    });
+    };
 
+  mesh.bringUp(fs, id_pub, id_prv, identity_persist);
+
+  // Seed NodePrefs on FIRST boot from config.json — name, location, passwords.
+  // Idempotent: only fills empty fields, so on subsequent boots the persisted
+  // com_prefs wins.
+  mesh.seedPrefsFromConfig(
+    jget<std::string>(cfg, "/node/name", ""),
+    jget<double>     (cfg, "/node/lat",  0.0),
+    jget<double>     (cfg, "/node/lon",  0.0),
+    jget<std::string>(cfg, "/node/admin_password", ""),
+    jget<std::string>(cfg, "/node/guest_password", ""));
   LOGI("repeater up; node='%s' freq=%.3fMHz sf=%u cr=%u",
        mesh.getNodePrefs()->node_name,
        (double)mesh.getNodePrefs()->freq,

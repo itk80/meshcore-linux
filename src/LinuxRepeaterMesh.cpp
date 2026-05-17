@@ -9,12 +9,13 @@ using namespace mesh;
 
 // ── Construction ──────────────────────────────────────────────────────
 
-LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, Radio& radio,
+LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, LinuxTcpRadio& radio,
                                      MillisecondClock& ms, RNG& rng,
                                      RTCClock& rtc, PacketManager& mgr,
                                      MeshTables& tables)
   : Mesh(radio, ms, rng, rtc, mgr, tables),
     _board(&board),
+    _tcp_radio(&radio),
     _fs(nullptr),
     acl(),
     region_map(key_store),
@@ -146,6 +147,31 @@ void LinuxRepeaterMesh::bringUp(FILESYSTEM& fs,
           (unsigned)_prefs.flood_advert_interval);
 }
 
+void LinuxRepeaterMesh::seedPrefsFromConfig(const std::string& name,
+                                            double lat, double lon,
+                                            const std::string& admin_password,
+                                            const std::string& guest_password) {
+  // Only seed empty fields — if loadPrefs already restored a value the
+  // operator picked, leave it alone. The config.json is the FIRST-RUN
+  // seed; com_prefs is the authoritative live state after that.
+  bool dirty = false;
+  if (_prefs.node_name[0] == '\0' && !name.empty()) {
+    std::snprintf(_prefs.node_name, sizeof(_prefs.node_name), "%s", name.c_str());
+    dirty = true;
+  }
+  if (_prefs.node_lat == 0.0 && lat != 0.0) { _prefs.node_lat = lat; dirty = true; }
+  if (_prefs.node_lon == 0.0 && lon != 0.0) { _prefs.node_lon = lon; dirty = true; }
+  if (_prefs.password[0] == '\0' && !admin_password.empty()) {
+    std::snprintf(_prefs.password, sizeof(_prefs.password), "%s", admin_password.c_str());
+    dirty = true;
+  }
+  if (_prefs.guest_password[0] == '\0' && !guest_password.empty()) {
+    std::snprintf(_prefs.guest_password, sizeof(_prefs.guest_password), "%s", guest_password.c_str());
+    dirty = true;
+  }
+  if (dirty) savePrefs();
+}
+
 // ── Forwarding / timing hooks ─────────────────────────────────────────
 
 int LinuxRepeaterMesh::calcRxDelay(float score, uint32_t air_time) const {
@@ -252,22 +278,17 @@ void LinuxRepeaterMesh::updateFloodAdvertTimer() {
 
 void LinuxRepeaterMesh::setTxPower(int8_t power_dbm) {
   _prefs.tx_power_dbm = power_dbm;
-  // Forward to wrapper via the generic Radio API; LinuxTcpRadio reroutes
-  // this to sendConfig() so the modem reconfigures the SX1262 power amp.
-  // (The cast guard lets us link without a hard dependency on the concrete
-  // wrapper type — _radio is mesh::Radio*.)
-  // Note: simple_repeater calls radio_driver.setTxPower(power_dbm); we have
-  // no such helper on mesh::Radio. Persisting the value in _prefs is enough
-  // for the next reconnect to push it via sendConfig at handshake time.
+  if (_tcp_radio) _tcp_radio->setTxPower(power_dbm);   // pushes fresh SET_CONFIG to modem
 }
 
 void LinuxRepeaterMesh::applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr, int /*timeout_mins*/) {
-  // Persist as the new live values; LinuxTcpRadio picks them up on
-  // reconnect via setLoRaParams() that main.cpp re-applies from prefs.
   _prefs.freq = freq;
   _prefs.bw   = bw;
   _prefs.sf   = sf;
   _prefs.cr   = cr;
+  if (_tcp_radio) {
+    _tcp_radio->setParams(freq, bw, sf, cr);   // hot-pushes SET_CONFIG to modem
+  }
   savePrefs();
 }
 
@@ -314,14 +335,85 @@ void LinuxRepeaterMesh::clearStats() {
 // ── CLI bridge ────────────────────────────────────────────────────────
 
 void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
-  // CommonCLI mutates `command` (strchr/strtok-style), so copy. Some paths
-  // in CommonCLI write large blobs (e.g. region listings, packet logs)
-  // straight into `reply` — caller must provide a generous buffer; we
-  // accept any size and CommonCLI is documented as expecting at least 160B.
+  // CommonCLI mutates `command` (strchr/strtok-style), so copy.
   char buf[256];
   std::snprintf(buf, sizeof(buf), "%s", command);
   reply[0] = '\0';
-  _cli.handleCommand(0, buf, reply);
+  char* cmd = buf;
+  while (*cmd == ' ') cmd++;
+
+  // ── MyMesh-only verbs (those that simple_repeater handles BEFORE the
+  //    fallthrough to CommonCLI). Same shape, minus Heltec-specific stuff
+  //    (bridges, ESP-NOW, OLED).
+
+  if (std::memcmp(cmd, "setperm ", 8) == 0) {
+    // setperm {pubkey-hex} {permissions-int8}
+    char* hex = cmd + 8;
+    char* sp = std::strchr(hex, ' ');
+    if (!sp) { std::strcpy(reply, "Err - usage: setperm <pubkey-hex> <permissions>"); return; }
+    *sp++ = '\0';
+    uint8_t pubkey[PUB_KEY_SIZE];
+    int hex_len = std::strlen(hex);
+    if (hex_len > (int)(PUB_KEY_SIZE * 2)) hex_len = PUB_KEY_SIZE * 2;
+    if (!mesh::Utils::fromHex(pubkey, hex_len / 2, hex)) {
+      std::strcpy(reply, "Err - bad pubkey hex"); return;
+    }
+    uint8_t perms = (uint8_t)std::atoi(sp);
+    if (acl.applyPermissions(self_id, pubkey, hex_len / 2, perms)) {
+      if (_fs) acl.save(_fs);   // optional filter dropped — save all
+      std::strcpy(reply, "OK");
+    } else {
+      std::strcpy(reply, "Err - invalid params");
+    }
+    return;
+  }
+  if (std::strcmp(cmd, "get acl") == 0) {
+    char* p = reply;
+    for (int i = 0; i < acl.getNumClients(); i++) {
+      auto c = acl.getClientByIdx(i);
+      if (c->permissions == 0) continue;   // skip deleted/guest
+      p += std::sprintf(p, "%02X ", c->permissions);
+      mesh::Utils::toHex(p, c->id.pub_key, PUB_KEY_SIZE);
+      p += PUB_KEY_SIZE * 2;
+      *p++ = '\n';
+    }
+    *p = '\0';
+    if (reply[0] == '\0') std::strcpy(reply, "(empty ACL)");
+    return;
+  }
+  if (std::memcmp(cmd, "discover.neighbors", 18) == 0) {
+    // Equivalent to MyMesh::sendNodeDiscoverReq — sends a DISCOVER request
+    // that asks each neighbour to reply with their own advert. We just
+    // schedule a fresh self-advert (flood) which neighbours respond to.
+    sendSelfAdvertisement(0, true);
+    std::strcpy(reply, "OK - Discover sent");
+    return;
+  }
+
+  // Fallthrough — common verbs (set/get freq, tx, radio, name, lat, lon,
+  // password, advert.interval, flood.advert.interval, flood.max, dutycycle,
+  // af, rxdelay, txdelay, direct.txdelay, int.thresh, agc.reset.interval,
+  // multi.acks, loop.detect, path.hash.mode, public.key, owner.info,
+  // neighbors, stats-core, stats-radio, stats-packets, ver, role, advert,
+  // flood.advert, log start/stop/erase, …).
+
+  // Snapshot LoRa-affecting fields BEFORE the CLI runs so we can hot-apply
+  // changes to the modem (CommonCLI's `set radio` / `set tx` write into
+  // _prefs and reply "reboot to apply" — we make it actually apply now).
+  float    pre_freq = _prefs.freq;
+  float    pre_bw   = _prefs.bw;
+  uint8_t  pre_sf   = _prefs.sf;
+  uint8_t  pre_cr   = _prefs.cr;
+  int8_t   pre_tx   = _prefs.tx_power_dbm;
+
+  _cli.handleCommand(0, cmd, reply);
+
+  if (_tcp_radio) {
+    bool lora_changed = (pre_freq != _prefs.freq) || (pre_bw != _prefs.bw)
+                     || (pre_sf   != _prefs.sf)   || (pre_cr != _prefs.cr);
+    if (lora_changed) _tcp_radio->setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+    if (pre_tx != _prefs.tx_power_dbm) _tcp_radio->setTxPower(_prefs.tx_power_dbm);
+  }
 }
 
 // ── Periodic tick ─────────────────────────────────────────────────────

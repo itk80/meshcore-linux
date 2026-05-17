@@ -21,6 +21,7 @@
 #include <Mesh.h>
 #include <functional>
 #include <string>
+#include "LinuxTcpRadio.h"   // for hot-applying radio params via setLoRaParams/setEndpoint
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
 #include <helpers/CommonCLI.h>
@@ -51,7 +52,7 @@ struct NeighbourInfo {
 
 class LinuxRepeaterMesh : public mesh::Mesh, public CommonCLICallbacks {
 public:
-  LinuxRepeaterMesh(mesh::MainBoard& board, mesh::Radio& radio,
+  LinuxRepeaterMesh(mesh::MainBoard& board, LinuxTcpRadio& radio,
                     mesh::MillisecondClock& ms, mesh::RNG& rng,
                     mesh::RTCClock& rtc, mesh::PacketManager& mgr,
                     mesh::MeshTables& tables);
@@ -68,6 +69,15 @@ public:
                const std::string& identity_pub_hex,
                const std::string& identity_prv_hex,
                OnIdentityGenerated on_generated);
+
+  // Seed NodePrefs from the JSON config when persistence is empty (first
+  // boot). Idempotent: existing _prefs.password/name/lat/lon are NOT
+  // overwritten if loadPrefs already restored them. Called by main.cpp
+  // right after bringUp().
+  void seedPrefsFromConfig(const std::string& name,
+                           double lat, double lon,
+                           const std::string& admin_password,
+                           const std::string& guest_password);
 
   // Bridge CLI command (called from HTTP /api/command). Returns nothing —
   // reply text goes into `reply` (caller must provide at least 160 B).
@@ -118,6 +128,7 @@ public:
 
 private:
   mesh::MainBoard* _board;
+  LinuxTcpRadio*   _tcp_radio;
   FILESYSTEM*      _fs;
   NodePrefs        _prefs;
   ClientACL        acl;

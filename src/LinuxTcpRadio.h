@@ -19,6 +19,12 @@ public:
   void setLoRaParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr,
                      int8_t power_dbm, uint16_t syncword, uint8_t preamble_len);
 
+  // Runtime LoRa reconfig (subset, used by CLI verbs `set freq/bw/sf/cr`).
+  // Updates the cached params and immediately re-sends SET_CONFIG to the
+  // modem if connected.
+  void setParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr);
+  void setTxPower(int8_t power_dbm);
+
   // mesh::Radio interface.
   void     begin() override;
   int      recvRaw(uint8_t* bytes, int sz) override;
