@@ -75,9 +75,10 @@ jobs:
             ## Install
 
             ```bash
-            ARCH=$(dpkg --print-architecture)   # amd64 or arm64
-            wget https://github.com/itk80/meshcore-linux/releases/download/${{ github.ref_name }}/meshcore-linux_${{ github.ref_name }}-1_${ARCH}.deb
-            sudo dpkg -i meshcore-linux_${{ github.ref_name }}-1_*.deb
+            VER="${{ github.ref_name }}"; VER="${VER#v}"   # strip leading 'v'
+            ARCH=$(dpkg --print-architecture)              # amd64 or arm64
+            wget "https://github.com/itk80/meshcore-linux/releases/download/${{ github.ref_name }}/meshcore-linux_${VER}-1_${ARCH}.deb"
+            sudo dpkg -i "meshcore-linux_${VER}-1_${ARCH}.deb"
             sudo nano /etc/Meshcore-Linux/config.json   # set modem.host
             sudo systemctl restart Meshcore-Linux
             ```
