@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+# Driven by debhelper compat 13. Builds via the in-tree Makefile;
+# debian/install handles file placement; dh_systemd_* wires the unit.
+
+export DH_VERBOSE = 1
+
+# MeshCore upstream lives in a sibling checkout; CI pulls it into
+# ../MeshCore before invoking dpkg-buildpackage. Local builds need
+# the same — see README "Build from source".
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE)
+
+override_dh_auto_install:
+	# No-op — dh_install reads debian/install and copies files into
+	# debian/meshcore-linux/ for us. Override exists only to suppress
+	# the default `make install` which our Makefile doesn't implement.
+	:
+
+override_dh_auto_clean:
+	-$(MAKE) clean

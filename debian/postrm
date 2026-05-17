@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  purge)
+    # Aggressive cleanup ONLY on apt purge — remove all operator state.
+    # Plain remove keeps /etc and /var/lib so upgrades / reinstalls are
+    # painless. The identity in config.json survives unless you purge.
+    rm -rf /etc/Meshcore-Linux /var/lib/Meshcore-Linux
+    if [ -d /run/systemd/system ]; then
+      deb-systemd-helper purge Meshcore-Linux.service >/dev/null || true
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    ;;
+  remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

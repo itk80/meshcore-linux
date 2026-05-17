@@ -1,0 +1,33 @@
+Source: meshcore-linux
+Section: net
+Priority: optional
+Maintainer: itk80 <i.t.keny@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ g++ (>= 11),
+ make,
+Standards-Version: 4.6.2
+Homepage: https://github.com/itk80/meshcore-linux
+Vcs-Browser: https://github.com/itk80/meshcore-linux
+Vcs-Git: https://github.com/itk80/meshcore-linux.git
+Rules-Requires-Root: no
+
+Package: meshcore-linux
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+Description: MeshCore repeater stack running natively on Linux
+ Linux systemd service running the MeshCore mesh repeater stack natively.
+ All radio operations are tunnelled over TCP to a remote modem running
+ pymc_tcp / pymc_usb firmware (https://github.com/itk80/pymc_usb); the
+ host needs no LoRa peripheral.
+ .
+ Features:
+  * mesh::Radio implementation over pymc_usb wire protocol v0.7
+  * Full mesh::Mesh + CommonCLICallbacks repeater (adverts, ACL,
+    loop detection, region scoping, remote LoRa admin)
+  * HTTP/JSON configurator on port 8080 with live status + CLI bridge
+  * systemd unit with ProtectSystem=strict + StateDirectory
+  * Identity persistence inside /etc/Meshcore-Linux/config.json
+    (atomic, preserved across upgrades and reinstalls)

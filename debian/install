@@ -1,0 +1,6 @@
+meshcore-linux                       usr/sbin
+systemd/Meshcore-Linux.service       lib/systemd/system
+config/config.example.json           usr/share/meshcore-linux
+README.md                            usr/share/doc/meshcore-linux
+THIRD_PARTY.md                       usr/share/doc/meshcore-linux
+LICENSE                              usr/share/doc/meshcore-linux

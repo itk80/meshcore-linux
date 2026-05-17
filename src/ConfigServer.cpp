@@ -13,7 +13,7 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MeshCore-Linux — Repeater Setup</title>
+<title>meshcore-linux — Repeater Setup</title>
 <style>
  :root {
    --bg:#0f1626; --panel:#171f33; --panel2:#1d2640; --line:#2a3450;
@@ -21,25 +21,45 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
    --warn:#ffb347; --btn-bg:#3aa0e6; --btn-fg:#0a121f;
  }
  *{box-sizing:border-box}
- body{margin:0;padding:0 1em 2em;background:var(--bg);color:var(--txt);
+ body{margin:0;padding:0;background:var(--bg);color:var(--txt);
       font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.4}
- .wrap{max-width:960px;margin:0 auto;padding-top:1em}
- h1{font-size:1.45em;margin:.3em 0 .2em} h2{font-size:1.2em;margin:.3em 0 .2em} h3{font-size:1em;margin:0}
- .head{display:flex;align-items:flex-start;gap:.8em;margin:.6em 0 1.4em;padding-bottom:.6em;border-bottom:1px solid var(--line)}
- .head .meta{color:var(--muted);font-size:.88em}
- .step{display:flex;gap:.9em;align-items:flex-start;margin:1.2em 0}
- .step .num{flex:0 0 2em;width:2em;height:2em;border-radius:50%;border:1px solid var(--acc);
-            color:var(--acc);display:flex;align-items:center;justify-content:center;font-weight:600}
- .step .body{flex:1 1 auto;min-width:0}
- .desc{color:var(--muted);font-size:.92em;margin:.2em 0 .8em}
+ .wrap{max-width:960px;margin:0 auto;padding:1em 1em 6em}
+
+ /* ── top header / live status ──────────────────────────────────────── */
+ header.top{position:sticky;top:0;z-index:5;background:var(--bg);
+            border-bottom:1px solid var(--line);padding:.7em 1em}
+ header.top .inner{max-width:960px;margin:0 auto;display:flex;align-items:center;gap:.8em;flex-wrap:wrap}
+ header.top h1{font-size:1.1em;margin:0;flex:0 0 auto}
+ header.top .status{flex:1 1 auto;color:var(--muted);font-size:.85em;font-family:ui-monospace,Menlo,Consolas,monospace}
+ header.top .status .dot{display:inline-block;width:.7em;height:.7em;border-radius:50%;
+                         background:var(--muted);margin-right:.3em;vertical-align:.05em}
+ header.top .status .dot.ok{background:var(--ok)}
+ header.top .status .dot.err{background:var(--err)}
+
+ /* ── tabs ──────────────────────────────────────────────────────────── */
+ nav.tabs{position:sticky;top:0;z-index:4;display:flex;gap:.3em;
+          border-bottom:1px solid var(--line);background:var(--bg);
+          padding:0 1em;margin-bottom:1em}
+ nav.tabs .tab{padding:.7em 1.1em;cursor:pointer;color:var(--muted);
+               border:0;background:transparent;font-size:.95em;font-family:inherit;
+               border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
+ nav.tabs .tab:hover{color:var(--txt)}
+ nav.tabs .tab.active{color:var(--acc);border-bottom-color:var(--acc)}
+ .panel{display:none}
+ .panel.active{display:block}
+
+ /* ── form widgets ──────────────────────────────────────────────────── */
+ h2{font-size:1.15em;margin:1.3em 0 .3em;color:var(--acc)}
+ h2:first-child{margin-top:.4em}
+ .desc{color:var(--muted);font-size:.9em;margin:.2em 0 .8em}
  label{display:block;color:var(--muted);font-size:.85em;margin:.7em 0 .25em}
  input[type=text],input[type=number],input[type=password],select{
    width:100%;background:var(--panel);color:var(--txt);border:1px solid var(--line);
-   border-radius:6px;padding:.6em .75em;font-size:.95em;font-family:inherit
+   border-radius:6px;padding:.55em .7em;font-size:.95em;font-family:inherit
  }
  input:focus,select:focus{outline:none;border-color:var(--acc)}
  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:.8em}
- .row{display:flex;gap:.8em;align-items:center}
+ .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.8em}
  .toggle{display:flex;align-items:center;justify-content:space-between;gap:1em;
          padding:.7em 0;border-top:1px solid var(--line)}
  .toggle:first-child{border:0}
@@ -52,214 +72,265 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
  .slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
  input:checked + .slider{background:var(--acc)}
  input:checked + .slider:before{transform:translateX(22px)}
- .btn{padding:.7em 1.1em;border:0;border-radius:8px;cursor:pointer;font-size:.95em;font-weight:600;font-family:inherit}
- .btn-primary{background:var(--btn-bg);color:var(--btn-fg)}
- .btn-secondary{background:transparent;color:var(--acc);border:1px solid var(--acc)}
- .btn-success{background:var(--ok);color:var(--btn-fg)}
- .btn-danger{background:#c4564a;color:#fff}
- .actions{display:flex;flex-wrap:wrap;gap:.6em;margin-top:1.4em}
  details{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.4em .9em;margin-top:1em}
  details summary{cursor:pointer;color:var(--acc);font-weight:600;padding:.4em 0}
  details[open] summary{margin-bottom:.4em}
- .msg{margin-left:.6em;font-size:.9em}
+
+ /* ── buttons ───────────────────────────────────────────────────────── */
+ .btn{padding:.6em 1.05em;border:0;border-radius:8px;cursor:pointer;font-size:.92em;font-weight:600;font-family:inherit}
+ .btn-primary{background:var(--btn-bg);color:var(--btn-fg)}
+ .btn-secondary{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+ .btn-danger{background:#c4564a;color:#fff}
+
+ /* ── sticky bottom save bar ────────────────────────────────────────── */
+ .savebar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);
+          border-top:1px solid var(--line);padding:.7em 1em;z-index:6}
+ .savebar .inner{max-width:960px;margin:0 auto;display:flex;align-items:center;gap:.6em;flex-wrap:wrap}
+ .savebar .spacer{flex:1 1 auto}
+ .msg{font-size:.9em}
  .msg.ok{color:var(--ok)} .msg.err{color:var(--err)} .msg.muted{color:var(--muted)}
+
+ /* ── status JSON drawer ────────────────────────────────────────────── */
  .status-box{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
-             padding:.6em .9em;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85em;
-             white-space:pre-wrap;color:var(--muted);max-height:14em;overflow:auto}
+             padding:.6em .9em;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82em;
+             white-space:pre-wrap;color:var(--muted);max-height:14em;overflow:auto;margin-top:.5em}
+
+ /* ── terminal ──────────────────────────────────────────────────────── */
  .term{background:#06090f;border:1px solid var(--line);border-radius:8px;padding:.6em .8em;
        font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em;color:#cfe3ff;
-       height:18em;overflow-y:scroll;white-space:pre-wrap;line-height:1.35}
+       height:50vh;min-height:18em;overflow-y:scroll;white-space:pre-wrap;line-height:1.35}
  .term .cmd{color:#ffd479}
  .term .ans{color:#7dd28b}
  .term .err{color:#ff7b72}
  .term .sys{color:#8c96ad;font-style:italic}
- .term-input{display:flex;gap:.5em;margin-top:.5em}
+ .term-input{display:flex;gap:.5em;margin-top:.6em}
  .term-input input{flex:1 1 auto;background:#06090f;border-color:var(--line);
                    font-family:ui-monospace,Menlo,Consolas,monospace}
- footer{margin-top:2.2em;color:var(--muted);font-size:.85em;text-align:center;border-top:1px solid var(--line);padding-top:.8em}
- @media (max-width:600px){ .grid2{grid-template-columns:1fr} .head{flex-direction:column} }
+ .term-tools{display:flex;gap:.5em;margin-top:.5em;justify-content:flex-end}
+
+ footer{margin-top:2em;color:var(--muted);font-size:.85em;text-align:center;padding-top:.8em;border-top:1px solid var(--line)}
+ @media (max-width:600px){
+   .grid2,.grid3{grid-template-columns:1fr}
+   nav.tabs{padding:0 .3em}
+   nav.tabs .tab{padding:.7em .6em;font-size:.9em}
+   header.top h1{font-size:1em}
+ }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-<header class="head">
-  <div style="flex:1 1 auto">
-    <h1>Repeater Setup</h1>
-    <div class="meta" id="meta">MeshCore-Linux &middot; loading&hellip;</div>
-  </div>
-  <button class="btn btn-secondary" onclick="refreshStatus()">Refresh</button>
+<header class="top">
+ <div class="inner">
+   <h1>meshcore-linux</h1>
+   <div class="status" id="meta"><span class="dot"></span>loading…</div>
+ </div>
 </header>
 
-<!-- ── Section 0: Radio Connection (TCP modem endpoint) ───────────────── -->
-<div class="step">
-  <div class="num">📡</div>
-  <div class="body">
-    <h2>Radio Connection</h2>
-    <p class="desc">The TCP modem this repeater talks to. Must be running <a style="color:var(--acc)" href="https://github.com/itk80/pymc_usb">pymc_usb</a> firmware. Changing either field forces a clean reconnect (RST-on-close).</p>
-    <div class="grid2">
-      <div><label>Modem host (IP or hostname)</label><input type="text"  id="modem_host"></div>
-      <div><label>Modem port</label>                  <input type="number" id="modem_port" min="1" max="65535"></div>
-    </div>
-    <label>Auth token (hex, empty for no auth)</label>
-    <input type="text" id="modem_token" placeholder="00112233...">
-  </div>
+<nav class="tabs" id="tabs">
+ <button class="tab active" data-tab="radio">Radio</button>
+ <button class="tab" data-tab="node">Node</button>
+ <button class="tab" data-tab="settings">Settings</button>
+ <button class="tab" data-tab="terminal">Terminal</button>
+</nav>
+
+<div class="wrap">
+
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: RADIO — modem endpoint + LoRa params                           -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="panel active" id="panel-radio">
+ <h2>Modem Connection</h2>
+ <p class="desc">TCP modem this repeater talks to. Must be running
+   <a style="color:var(--acc)" href="https://github.com/itk80/pymc_usb" target="_blank">pymc_usb</a>
+   firmware. Changing host or port forces a clean reconnect (RST-on-close).</p>
+ <div class="grid2">
+   <div><label>Host (IP or hostname)</label><input type="text" id="modem_host"></div>
+   <div><label>Port</label><input type="number" id="modem_port" min="1" max="65535"></div>
+ </div>
+ <label>Auth token (hex, empty = no auth)</label>
+ <input type="text" id="modem_token" placeholder="00112233…">
+
+ <h2>Radio Parameters</h2>
+ <p class="desc">Pick a regional preset or use Custom. Every node in your
+   mesh must use identical freq/bw/sf/cr.</p>
+ <label>Regional Preset</label>
+ <select id="lora_preset" onchange="onPresetChange()">
+   <option value="EU/UK (Narrow)">EU/UK (Narrow)</option>
+   <option value="EU/UK (Wide)">EU/UK (Wide)</option>
+   <option value="US">US</option>
+   <option value="Custom">Custom</option>
+ </select>
+ <div class="grid2" style="margin-top:.6em">
+   <div><label>Frequency (MHz)</label><input type="number" step="0.001" id="lora_freq_mhz"></div>
+   <div><label>Bandwidth (kHz)</label>
+     <select id="lora_bw_khz">
+       <option>7.8</option><option>10.4</option><option>15.6</option><option>20.8</option>
+       <option>31.25</option><option>41.7</option><option>62.5</option><option>125</option>
+       <option>250</option><option>500</option>
+     </select>
+   </div>
+ </div>
+ <div class="grid3" style="margin-top:.6em">
+   <div><label>Spreading Factor</label>
+     <select id="lora_sf"><option>5</option><option>6</option><option>7</option><option>8</option>
+                         <option>9</option><option>10</option><option>11</option><option>12</option></select>
+   </div>
+   <div><label>Coding Rate</label>
+     <select id="lora_cr"><option value="5">5 (4/5)</option><option value="6">6 (4/6)</option>
+                         <option value="7">7 (4/7)</option><option value="8">8 (4/8)</option></select>
+   </div>
+   <div><label>TX Power (dBm)</label><input type="number" step="1" id="lora_tx_power_dbm"></div>
+ </div>
+ <label>Duty Cycle (%)</label>
+ <input type="number" step="1" id="repeater_duty_cycle_pct">
 </div>
 
-<!-- ── Section 1: Name & Location ─────────────────────────────────────── -->
-<div class="step">
-  <div class="num">1</div>
-  <div class="body">
-    <h2>Name &amp; Location</h2>
-    <p class="desc">Give your repeater a name and set its location (decimal degrees).</p>
-    <label>Name</label>
-    <input type="text" id="node_name" placeholder="My Repeater">
-    <div class="grid2" style="margin-top:.6em">
-      <div><label>Latitude</label> <input type="number" step="0.0000001" id="node_lat" placeholder="0"></div>
-      <div><label>Longitude</label><input type="number" step="0.0000001" id="node_lon" placeholder="0"></div>
-    </div>
-    <p class="desc" id="mapLink"></p>
-  </div>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: NODE — name, location, passwords                               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-node">
+ <h2>Identity</h2>
+ <label>Node name</label>
+ <input type="text" id="node_name" placeholder="My Repeater">
+
+ <h2>Location</h2>
+ <p class="desc">Broadcast in adverts so clients can place this node on a map.
+   Decimal degrees; leave 0/0 if you don't want to share location.</p>
+ <div class="grid2">
+   <div><label>Latitude</label> <input type="number" step="0.0000001" id="node_lat" placeholder="0"></div>
+   <div><label>Longitude</label><input type="number" step="0.0000001" id="node_lon" placeholder="0"></div>
+ </div>
+ <p class="desc" id="mapLink"></p>
+
+ <h2>Access Control</h2>
+ <p class="desc">Passwords for admin clients connecting over LoRa. Leave empty to
+   keep the current value.</p>
+ <div class="grid2">
+   <div><label>Admin password</label><input type="password" id="node_admin_password" placeholder="leave empty to keep current"></div>
+   <div><label>Guest password</label><input type="password" id="node_guest_password" placeholder="empty allows guest access"></div>
+ </div>
 </div>
 
-<!-- ── Section 2: Radio Settings ──────────────────────────────────────── -->
-<div class="step">
-  <div class="num">2</div>
-  <div class="body">
-    <h2>Radio Settings</h2>
-    <p class="desc">Choose a regional preset or set parameters manually. All devices in your mesh must use the same settings.</p>
-    <label>Regional Preset</label>
-    <select id="lora_preset" onchange="onPresetChange()">
-      <option value="EU/UK (Narrow)">EU/UK (Narrow)</option>
-      <option value="EU/UK (Wide)">EU/UK (Wide)</option>
-      <option value="US">US</option>
-      <option value="Custom">Custom</option>
-    </select>
-    <p class="desc"><em>Choose <b>Custom</b> to edit the fields below manually.</em></p>
-    <label>Frequency (MHz)</label>
-    <input type="number" step="0.001" id="lora_freq_mhz">
-    <label>Bandwidth (kHz)</label>
-    <select id="lora_bw_khz">
-      <option>7.8</option><option>10.4</option><option>15.6</option><option>20.8</option>
-      <option>31.25</option><option>41.7</option><option>62.5</option><option>125</option>
-      <option>250</option><option>500</option>
-    </select>
-    <label>Spreading Factor</label>
-    <select id="lora_sf"><option>5</option><option>6</option><option>7</option><option>8</option>
-                        <option>9</option><option>10</option><option>11</option><option>12</option></select>
-    <label>Coding Rate</label>
-    <select id="lora_cr"><option value="5">5 (4/5)</option><option value="6">6 (4/6)</option>
-                        <option value="7">7 (4/7)</option><option value="8">8 (4/8)</option></select>
-    <label>TX Power (dBm)</label>
-    <input type="number" step="1" id="lora_tx_power_dbm">
-    <label>Duty Cycle (%)</label>
-    <input type="number" step="1" id="repeater_duty_cycle_pct">
-  </div>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: SETTINGS — adverts, flood, loop detect, advanced               -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-settings">
+ <h2>Advertising</h2>
+ <p class="desc">How often this node beacons itself onto the mesh. Set to 0 to
+   disable until you've reviewed identity/region.</p>
+ <div class="grid3">
+   <div><label>Local advert (min)</label><input type="number" step="1" min="0" id="repeater_advert_interval_min"></div>
+   <div><label>Flood advert (h)</label><input type="number" step="1" min="0" id="repeater_flood_advert_interval_h"></div>
+   <div><label>Flood max hops</label><input type="number" step="1" id="repeater_flood_max_hops"></div>
+ </div>
+ <div class="toggle">
+   <div class="copy">
+     <div class="name">Large mesh optimisation</div>
+     <div class="desc">Suppresses periodic adverts. Recommended for busy networks.</div>
+   </div>
+   <label class="switch"><input type="checkbox" id="repeater_large_mesh_optim"><span class="slider"></span></label>
+ </div>
+
+ <h2>Routing</h2>
+ <div class="grid2">
+   <div><label>Loop detection</label>
+     <select id="repeater_loop_detect">
+       <option value="off">off</option>
+       <option value="minimal">minimal</option>
+       <option value="moderate">moderate</option>
+       <option value="strict">strict</option>
+     </select>
+   </div>
+   <div><label>Path hash size</label>
+     <select id="repeater_path_hash_mode">
+       <option value="0">1 byte / hop  (smallest packets, most collisions)</option>
+       <option value="1">2 bytes / hop (balanced — default)</option>
+       <option value="2">3 bytes / hop (largest packets, fewest collisions)</option>
+     </select>
+   </div>
+ </div>
+
+ <details>
+   <summary>Advanced timing &amp; ACK</summary>
+   <div class="grid2">
+     <div><label>Interference threshold</label><input type="number" id="repeater_interference_threshold"></div>
+     <div><label>AGC reset interval</label><input type="number" id="repeater_agc_reset_interval"></div>
+     <div><label>RX delay base</label><input type="number" step="0.01" id="repeater_rx_delay_base"></div>
+     <div><label>TX delay factor</label><input type="number" step="0.01" id="repeater_tx_delay_factor"></div>
+     <div><label>Direct TX delay</label><input type="number" step="0.0000001" id="repeater_direct_tx_delay_factor"></div>
+   </div>
+   <div class="toggle">
+     <div class="copy"><div class="name">Multi ACKs</div><div class="desc">Enable multi-ack support.</div></div>
+     <label class="switch"><input type="checkbox" id="repeater_multi_acks"><span class="slider"></span></label>
+   </div>
+ </details>
+
+ <details>
+   <summary>Live runtime status (auto-refresh)</summary>
+   <div class="status-box" id="status">loading…</div>
+ </details>
 </div>
 
-<!-- ── Section 3: Advertising ─────────────────────────────────────────── -->
-<div class="step">
-  <div class="num">3</div>
-  <div class="body">
-    <h2>Advertising</h2>
-    <p class="desc">Control how often your device announces itself on the mesh network.</p>
-    <label>Advert Interval (minutes)</label>
-    <input type="number" step="1" id="repeater_advert_interval_min" min="0">
-    <label>Flood Advert Interval (hours)</label>
-    <input type="number" step="1" id="repeater_flood_advert_interval_h" min="0">
-    <label>Flood Max Hops</label>
-    <input type="number" step="1" id="repeater_flood_max_hops">
-    <div class="toggle">
-      <div class="copy">
-        <div class="name">Large Mesh Optimisation</div>
-        <div class="desc">Reduces unnecessary broadcasts by disabling repeater adverts. Recommended for busy networks.</div>
-      </div>
-      <label class="switch"><input type="checkbox" id="repeater_large_mesh_optim"><span class="slider"></span></label>
-    </div>
-  </div>
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: TERMINAL — CLI bridge                                          -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="panel" id="panel-terminal">
+ <h2>CLI Terminal</h2>
+ <p class="desc">Raw commands to the repeater. History persists in browser
+   localStorage. Output is also written to <code>journalctl -fu Meshcore-Linux</code>.
+   Try: <code>get neighbors</code> · <code>get radio</code> · <code>advert</code> · <code>ver</code>.</p>
+ <div class="term" id="term"><span class="sys">[ready]
+</span></div>
+ <div class="term-input">
+   <input type="text" id="cli" placeholder="Command…   ↑/↓ history · Enter to send" autocomplete="off">
+   <button class="btn btn-primary" onclick="cliSend()">Send</button>
+ </div>
+ <div class="term-tools">
+   <button class="btn btn-secondary" onclick="termClear()">Clear screen</button>
+   <button class="btn btn-secondary" onclick="histClear()">Clear history</button>
+ </div>
 </div>
 
-<!-- ── Section 4: Access Control ──────────────────────────────────────── -->
-<div class="step">
-  <div class="num">4</div>
-  <div class="body">
-    <h2>Access Control</h2>
-    <p class="desc">Set passwords to control who can manage this device.</p>
-    <label>Admin Password</label>
-    <input type="password" id="node_admin_password" placeholder="Leave empty to keep current">
-    <label>Guest Password</label>
-    <input type="password" id="node_guest_password" placeholder="Leave empty to allow guest access">
+<footer>
+ meshcore-linux ·
+ <a style="color:var(--acc)" href="/api/config">raw config</a> ·
+ <a style="color:var(--acc)" href="/api/status">raw status</a> ·
+ <a style="color:var(--acc)" href="https://github.com/itk80/meshcore-linux" target="_blank">github</a>
+</footer>
 
-    <details>
-      <summary>Advanced Settings</summary>
-      <label>Loop Detection</label>
-      <select id="repeater_loop_detect">
-        <option value="off">off</option>
-        <option value="minimal">minimal</option>
-        <option value="moderate">moderate</option>
-        <option value="strict">strict</option>
-      </select>
-      <label>Path Hash Size</label>
-      <select id="repeater_path_hash_mode">
-        <option value="0">1 byte / hop  (smallest packets, most collisions)</option>
-        <option value="1">2 bytes / hop (balanced — default)</option>
-        <option value="2">3 bytes / hop (largest packets, fewest collisions)</option>
-      </select>
-      <label>Interference Threshold</label>
-      <input type="number" id="repeater_interference_threshold">
-      <label>AGC Reset Interval</label>
-      <input type="number" id="repeater_agc_reset_interval">
-      <label>RX Delay Base</label>
-      <input type="number" step="0.01" id="repeater_rx_delay_base">
-      <label>TX Delay Factor</label>
-      <input type="number" step="0.01" id="repeater_tx_delay_factor">
-      <label>Direct TX Delay</label>
-      <input type="number" step="0.0000001" id="repeater_direct_tx_delay_factor">
-      <div class="toggle">
-        <div class="copy"><div class="name">Multi ACKs</div><div class="desc">Enable multi-ack support.</div></div>
-        <label class="switch"><input type="checkbox" id="repeater_multi_acks"><span class="slider"></span></label>
-      </div>
-    </details>
-  </div>
-</div>
+</div><!-- /wrap -->
 
-<!-- ── Actions ────────────────────────────────────────────────────────── -->
-<div class="actions">
-  <button class="btn btn-primary" onclick="save()">💾 Save Settings</button>
-  <button class="btn btn-secondary" onclick="sendAdvert()">📡 Send Advert</button>
-  <button class="btn btn-danger" onclick="restart()">⟳ Restart service</button>
-  <span class="msg muted" id="saveMsg"></span>
-</div>
-
-<!-- ── Status panel ───────────────────────────────────────────────────── -->
-<div class="step">
-  <div class="num">📊</div>
-  <div class="body">
-    <h2>Status</h2>
-    <div class="status-box" id="status">loading&hellip;</div>
-  </div>
-</div>
-
-<!-- ── CLI Terminal ───────────────────────────────────────────────────── -->
-<div class="step">
-  <div class="num">▶</div>
-  <div class="body">
-    <h2>CLI Terminal</h2>
-    <p class="desc">Send raw commands to the repeater (e.g. <code>get neighbors</code>, <code>set tx_power 14</code>, <code>advert</code>). Output is also visible in <code>journalctl -fu Meshcore-Linux</code>.</p>
-    <div class="term" id="term"><span class="sys">[ready] try: get stats · get radio.stats · advert · ver</span>
-</div>
-    <div class="term-input">
-      <input type="text" id="cli" placeholder="Command... (↑/↓ history, Enter to send)" autocomplete="off">
-      <button class="btn btn-primary" onclick="cliSend()">Send</button>
-    </div>
-  </div>
-</div>
-
-<footer>MeshCore-Linux &middot; HTTP API <code>:8080</code> &middot; <a style="color:var(--acc)" href="/api/config">raw config</a> &middot; <a style="color:var(--acc)" href="/api/status">raw status</a></footer>
-
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<!-- STICKY SAVE BAR (always visible)                                    -->
+<!-- ════════════════════════════════════════════════════════════════════ -->
+<div class="savebar">
+ <div class="inner">
+   <button class="btn btn-primary"   onclick="save()">💾 Save</button>
+   <button class="btn btn-secondary" onclick="sendAdvert()">📡 Send advert</button>
+   <button class="btn btn-danger"    onclick="restart()">⟳ Restart</button>
+   <span class="spacer"></span>
+   <span class="msg muted" id="saveMsg"></span>
+ </div>
 </div>
 
 <script>
+// ── Tab switcher ─────────────────────────────────────────────────────
+document.querySelectorAll('nav.tabs .tab').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs .tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('panel-'+b.dataset.tab).classList.add('active');
+    // Remember last tab across reloads.
+    try { localStorage.setItem('mcl_tab', b.dataset.tab); } catch(e) {}
+  });
+});
+try {
+  const t = localStorage.getItem('mcl_tab');
+  if (t) document.querySelector('nav.tabs .tab[data-tab="'+t+'"]')?.click();
+} catch(e) {}
+
+// ── Form helpers ─────────────────────────────────────────────────────
 const PRESETS = {
   'EU/UK (Narrow)':{ freq_mhz:869.618, bw_khz:62.5, sf:8, cr:8 },
   'EU/UK (Wide)':  { freq_mhz:868.5,   bw_khz:250,  sf:8, cr:5 },
@@ -284,7 +355,7 @@ async function load(){
   setVal('node_name', CFG?.node?.name);
   setVal('node_lat',  CFG?.node?.lat);
   setVal('node_lon',  CFG?.node?.lon);
-  setVal('node_admin_password', '');  // never prefill — leave empty = keep current
+  setVal('node_admin_password', '');  // never prefill — empty means "keep current"
   setVal('node_guest_password', '');
 
   setVal('lora_preset', CFG?.lora?.preset || 'Custom');
@@ -317,7 +388,7 @@ function updateMapLink(){
   const link = $('mapLink');
   if (!isNaN(lat) && !isNaN(lon) && (lat!==0 || lon!==0)) {
     link.innerHTML = `📍 <a style="color:var(--acc)" target="_blank" href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}">Open on OpenStreetMap</a>`;
-  } else { link.textContent = 'Set lat/lon to see a map link.'; }
+  } else { link.textContent = 'Set lat/lon to share a position.'; }
 }
 $('node_lat').addEventListener('change', updateMapLink);
 $('node_lon').addEventListener('change', updateMapLink);
@@ -333,7 +404,7 @@ function onPresetChange(){
 }
 
 function buildConfig(){
-  const next = JSON.parse(JSON.stringify(CFG));   // deep clone — preserves identity/api fields
+  const next = JSON.parse(JSON.stringify(CFG));   // deep clone — preserve identity/api fields
   next.modem = next.modem || {};
   const mh = getVal('modem_host'); if (mh) next.modem.host = mh;
   const mp = parseInt(getVal('modem_port'));     if (mp) next.modem.port = mp;
@@ -384,34 +455,70 @@ async function save(){
 async function sendAdvert(){
   const r = await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:'advert'})});
   const j = await r.json();
-  termLine('cmd', 'advert'); termLine(j.ok ? 'ans' : 'err', j.reply || j.error || '(no reply)');
+  termLine('cmd', 'advert');
+  termLine(j.ok ? 'ans' : 'err', j.reply || j.error || '(no reply)');
+  const msg = $('saveMsg');
+  msg.textContent = j.ok ? 'advert sent' : ('advert error: '+j.error);
+  msg.className   = j.ok ? 'msg ok' : 'msg err';
 }
 async function restart(){
-  if(!confirm('Restart the Meshcore-Linux service? (systemd will bring it back up in ~5 s.)')) return;
+  if(!confirm('Restart the meshcore-linux service? (systemd brings it back up in ~5s.)')) return;
   await fetch('/api/reboot',{method:'POST'});
-  $('saveMsg').textContent='service exiting — systemd will restart shortly';
-  $('saveMsg').className='msg muted';
+  const msg = $('saveMsg');
+  msg.textContent='service exiting — systemd will restart shortly';
+  msg.className='msg muted';
 }
+
 async function refreshStatus(){
   try {
     const r = await fetch('/api/status'); const j = await r.json();
     $('status').textContent = JSON.stringify(j, null, 2);
-    const h = j.modem||{}; const u = j.service||{};
-    $('meta').textContent = `modem ${h.host}:${h.port} ${h.connected?'·connected':'·DOWN'} ${h.handshake?'·hs ok':''} · uptime ${u.uptime_secs||0}s`;
-  } catch(e){ $('status').textContent='(cannot fetch /api/status: '+e+')'; }
+    const h = j.modem||{}; const u = j.service||{}; const s = j.stats||{};
+    const dot = h.connected ? 'ok' : 'err';
+    const hs  = h.handshake ? '· hs' : '';
+    const upt = u.uptime_secs||0;
+    const upText = upt < 60 ? upt+'s' : upt < 3600 ? Math.floor(upt/60)+'m' : Math.floor(upt/3600)+'h';
+    $('meta').innerHTML = `<span class="dot ${dot}"></span>modem ${h.host||'?'}:${h.port||'?'} `
+      + `${h.connected?'connected':'DOWN'} ${hs} · uptime ${upText} `
+      + `· rx=${s.rx??0} tx=${s.tx??0} crc=${s.crc_err??0}`;
+  } catch(e){
+    $('meta').innerHTML = `<span class="dot err"></span>(cannot fetch /api/status: ${e})`;
+    $('status').textContent='(cannot fetch /api/status: '+e+')';
+  }
 }
 
-// ── CLI terminal ───────────────────────────────────────────────────────
+// ── CLI terminal — history in localStorage ───────────────────────────
 const TERM=$('term'); const CLI=$('cli');
+const HIST_KEY='mcl_hist'; const HIST_MAX=100;
 let HIST=[]; let HISTI=-1;
+try { HIST = JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); HISTI = HIST.length; } catch(e) { HIST=[]; HISTI=0; }
+
 function termLine(cls, text){
-  const span=document.createElement('span'); span.className=cls; span.textContent=text+'\n';
-  TERM.appendChild(span); TERM.scrollTop=TERM.scrollHeight;
+  const span=document.createElement('span');
+  span.className=cls;
+  span.textContent=text+'\n';
+  TERM.appendChild(span);
+  TERM.scrollTop=TERM.scrollHeight;
+}
+function termClear(){
+  TERM.innerHTML='';
+  termLine('sys','[cleared]');
+}
+function histPush(cmd){
+  HIST.push(cmd);
+  if (HIST.length > HIST_MAX) HIST = HIST.slice(-HIST_MAX);
+  HISTI = HIST.length;
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(HIST)); } catch(e) {}
+}
+function histClear(){
+  HIST=[]; HISTI=0;
+  try { localStorage.removeItem(HIST_KEY); } catch(e) {}
+  termLine('sys','[history cleared]');
 }
 async function cliSend(){
   const cmd = CLI.value.trim(); if(!cmd) return;
   termLine('cmd', '> '+cmd);
-  HIST.push(cmd); HISTI=HIST.length;
+  histPush(cmd);
   CLI.value='';
   try {
     const r = await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd})});
@@ -426,8 +533,13 @@ CLI.addEventListener('keydown', e=>{
     if(HISTI<HIST.length-1){HISTI++;CLI.value=HIST[HISTI];}
     else {HISTI=HIST.length; CLI.value='';} }
 });
+// On first paint, show a hint if history exists.
+if (HIST.length) termLine('sys','[history restored: '+HIST.length+' command(s)]');
 
-load(); refreshStatus(); setInterval(refreshStatus, 5000);
+// ── Boot ─────────────────────────────────────────────────────────────
+load();
+refreshStatus();
+setInterval(refreshStatus, 3000);
 </script>
 </body></html>
 )HTML";

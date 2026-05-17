@@ -1,0 +1,41 @@
+#!/bin/sh
+set -e
+
+CFG_DIR=/etc/Meshcore-Linux
+CFG=$CFG_DIR/config.json
+EXAMPLE=/usr/share/meshcore-linux/config.example.json
+
+case "$1" in
+  configure)
+    mkdir -p "$CFG_DIR"
+    # Seed the config file ONLY on a clean install. dpkg ships the
+    # example to /usr/share so upgrades can compare without trampling
+    # the operator's keys/passwords/lat/lon already in /etc.
+    if [ ! -f "$CFG" ]; then
+      install -m 0640 "$EXAMPLE" "$CFG"
+      chown root:root "$CFG"
+      echo "Meshcore-Linux: seeded $CFG — review modem.host etc. before starting."
+    fi
+
+    # systemd integration. deb-systemd-helper handles enable/start; do
+    # nothing fancy ourselves, just reload the daemon to pick up the
+    # unit file. Service will auto-restart per Restart=always.
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+      if deb-systemd-helper --quiet was-enabled Meshcore-Linux.service; then
+        deb-systemd-helper enable Meshcore-Linux.service >/dev/null || true
+      else
+        deb-systemd-helper update-state Meshcore-Linux.service >/dev/null || true
+      fi
+      # Don't auto-start on a fresh install — the seeded config has a
+      # placeholder modem.host. Operator edits the file then starts.
+      if [ -z "${DPKG_MAINTSCRIPT_FIRST_INSTALL:-}" ]; then
+        systemctl try-restart Meshcore-Linux.service >/dev/null 2>&1 || true
+      fi
+    fi
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0
