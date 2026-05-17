@@ -40,6 +40,19 @@ jobs:
         working-directory: meshcore-linux
         run: make
 
+      - name: Unit tests (pymc_proto golden vectors)
+        working-directory: meshcore-linux
+        run: make test
+
+      - name: Software interop (mock pymc_usb modem)
+        working-directory: meshcore-linux
+        run: |
+          # Ed25519 signature verification in tests/run_interop.sh needs
+          # the cryptography lib; without it the signature step is skipped
+          # but every other assertion still runs.
+          python3 -m pip install --user cryptography >/dev/null
+          make interop
+
       - name: Smoke-run binary (help / version path)
         working-directory: meshcore-linux
         run: |

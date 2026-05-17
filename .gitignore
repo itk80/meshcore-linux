@@ -12,3 +12,10 @@ compile_commands.json
 
 # Local-only working notes
 STATUS.md
+
+# Test artefacts (produced by `make test` / `make interop`)
+tests/test_pymc_proto
+tests/captured_tx.hex
+tests/*.log
+tests/.interop_state/
+tests/__pycache__/

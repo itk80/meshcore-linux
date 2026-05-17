@@ -90,6 +90,23 @@ run: $(BIN)
 	./$(BIN) config/config.example.json
 
 clean:
-	rm -f $(BIN)
+	rm -f $(BIN) tests/test_pymc_proto tests/captured_tx.hex tests/mock_modem.log tests/binary.log
+	rm -rf tests/.interop_state
 
-.PHONY: all run clean
+# Pure C++ unit tests for the wire-protocol layer (pymc_proto.h).
+# No MeshCore deps — fast, hermetic, runs in CI without ../MeshCore.
+TEST_BIN := tests/test_pymc_proto
+$(TEST_BIN): tests/test_pymc_proto.cpp src/pymc_proto.h
+	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter -Isrc \
+	    tests/test_pymc_proto.cpp -o $(TEST_BIN)
+
+test: $(TEST_BIN)
+	$(TEST_BIN)
+
+# Software-side interop test. Needs $(BIN) built; spins
+# up the Python mock modem, drives the binary via /api/command, verifies
+# the captured on-air bytes parse as a valid signed MeshCore advert.
+interop: $(BIN)
+	bash tests/run_interop.sh
+
+.PHONY: all run clean test interop

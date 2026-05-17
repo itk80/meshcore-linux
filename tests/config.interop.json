@@ -1,0 +1,49 @@
+{
+  "_comment": "Fixed-identity config used by tests/run_interop.sh. The keypair is the canonical MeshCore upstream test client (Identity.cpp:59-74), so the on-air adverts produced under this config are reproducible across machines and verifiable against the same pubkey. Do NOT use these keys for anything outside the test harness.",
+  "config_api": {
+    "bind": "127.0.0.1",
+    "port": 18080
+  },
+  "identity": {
+    "pub": "1ec77175b0918ed206f9ae04ec136d6d5d4315bb26305427f645b492e9350c10",
+    "prv": "7065e18fd9fabb70c1ed90dca19907de698c88b709ea146eafd93d9b830c7b60c4681193c79bbc39945ba8064104bb618f8fd7a84a0af6f57033d6e8ddcd6471"
+  },
+  "lora": {
+    "bw_khz": 62.5,
+    "cr": 8,
+    "freq_mhz": 869.618,
+    "preamble_len": 16,
+    "preset": "EU/UK (Narrow)",
+    "sf": 8,
+    "syncword": 18,
+    "tx_power_dbm": 22
+  },
+  "modem": {
+    "host": "127.0.0.1",
+    "port": 15055,
+    "token": ""
+  },
+  "node": {
+    "admin_password": "interop-test",
+    "guest_password": "",
+    "lat": 0.0,
+    "lon": 0.0,
+    "name": "InteropTestNode"
+  },
+  "repeater": {
+    "advert_interval_min": 1,
+    "agc_reset_interval": 0,
+    "direct_tx_delay_factor": 0.3,
+    "duty_cycle_pct": 50,
+    "flood_advert_interval_h": 0,
+    "flood_max_hops": 64,
+    "interference_threshold": 0,
+    "large_mesh_optim": false,
+    "loop_detect": "minimal",
+    "multi_acks": false,
+    "path_hash_mode": 1,
+    "rx_delay_base": 0.0,
+    "tx_delay_factor": 0.5
+  },
+  "state_dir": "./tests/.interop_state"
+}
