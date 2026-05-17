@@ -24,6 +24,13 @@ Copyright: 2025 Scott Powell / rippleradios.com
 License: MIT
 Comment: Vendored from MeshCore/examples/simple_repeater/RateLimiter.h.
 
+Files: src/pymc_proto.h
+Copyright: 2026 itk80 <i.t.keny@gmail.com>
+License: MIT
+Comment: pymc_usb wire protocol v0.7 — constants, framing helpers, packed
+ structs. Vendored from https://github.com/itk80/pymc_usb so the protocol
+ contract lives inside this repo too.
+
 Files: shims/*
 Copyright: 2026 itk80 <i.t.keny@gmail.com>
 License: MIT

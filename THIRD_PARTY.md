@@ -52,5 +52,7 @@ built binary; all are MIT-licensed and reproduced under that license.
 - **Project**: https://github.com/itk80/pymc_usb
 - **License**: MIT — Copyright (c) itk80
 - **Used as**: the modem-side firmware this service talks to. The wire
-  protocol v0.7 is implemented in `src/LinuxTcpRadio.{h,cpp}`; no pymc_usb
-  source ships in this repo.
+  protocol v0.7 is implemented in `src/LinuxTcpRadio.{h,cpp}` against
+  the header `src/pymc_proto.h` (constants, framing, packed structs) —
+  vendored from the corresponding header in pymc_usb so the protocol
+  contract sits inside this repo.

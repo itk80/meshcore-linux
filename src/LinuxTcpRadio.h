@@ -6,7 +6,7 @@
 // machines, different transport (POSIX socket vs Arduino WiFiClient).
 
 #include "../shims/PosixArduinoCompat.h"   // WiFiClient + millis/delay/Serial/esp_random
-#include "helpers/tcpradio/pymc_proto.h"   // shared protocol/framing (lives in MeshCore)
+#include "pymc_proto.h"                    // pymc_usb wire protocol v0.7
 
 #include <Dispatcher.h>                    // mesh::Radio base
 
