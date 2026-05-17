@@ -65,6 +65,7 @@ LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, LinuxTcpRadio& radio,
     // ProtectSystem=strict ReadWritePaths covers it without a second
     // ReadWritePaths entry. Operators can rotate it with logrotate by path.
     _log_path("/var/lib/Meshcore-Linux/packets.log"),
+    _start_millis(0),
     next_local_advert(0),
     next_flood_advert(0),
     dirty_contacts_expiry(0),
@@ -153,6 +154,10 @@ void LinuxRepeaterMesh::bringUp(FILESYSTEM& fs,
                                 const std::string& identity_prv_hex,
                                 OnIdentityGenerated on_generated) {
   _fs = &fs;
+  // Snapshot millis-since-system-boot at startup so REQ_TYPE_GET_STATUS can
+  // report uptime since THIS service instance came up (not since the host
+  // booted). steady_clock survives wall-clock changes, which we want here.
+  _start_millis = _ms->getMillis();
 
   // 1. Load identity from config, or generate + persist via callback.
   // LocalIdentity has a (prv_hex, pub_hex) ctor that accepts our hex blobs
@@ -787,7 +792,7 @@ int LinuxRepeaterMesh::handleRequest(ClientInfo* sender, uint32_t sender_timesta
     stats.n_packets_recv = _tcp_radio ? _tcp_radio->getRxCount() : 0;
     stats.n_packets_sent = _tcp_radio ? _tcp_radio->getTxCount() : 0;
     stats.total_air_time_secs = (uint32_t)(getTotalAirTime() / 1000);
-    stats.total_up_time_secs  = (uint32_t)(_ms->getMillis() / 1000);
+    stats.total_up_time_secs  = (uint32_t)((_ms->getMillis() - _start_millis) / 1000);
     stats.n_sent_flood  = getNumSentFlood();
     stats.n_sent_direct = getNumSentDirect();
     stats.n_recv_flood  = getNumRecvFlood();

@@ -216,6 +216,7 @@ private:
 
   bool          _logging;
   std::string   _log_path;
+  unsigned long _start_millis;          // _ms->getMillis() at bringUp()
   unsigned long next_local_advert;
   unsigned long next_flood_advert;
   unsigned long dirty_contacts_expiry;
