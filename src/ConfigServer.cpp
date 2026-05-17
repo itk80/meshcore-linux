@@ -199,9 +199,11 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
         <option value="moderate">moderate</option>
         <option value="strict">strict</option>
       </select>
-      <label>Path Hash Mode</label>
+      <label>Path Hash Size</label>
       <select id="repeater_path_hash_mode">
-        <option value="0">0</option><option value="1">1</option><option value="2">2</option>
+        <option value="0">1 byte / hop  (smallest packets, most collisions)</option>
+        <option value="1">2 bytes / hop (balanced — default)</option>
+        <option value="2">3 bytes / hop (largest packets, fewest collisions)</option>
       </select>
       <label>Interference Threshold</label>
       <input type="number" id="repeater_interference_threshold">
