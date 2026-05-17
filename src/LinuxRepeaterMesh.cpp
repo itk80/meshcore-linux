@@ -449,6 +449,20 @@ void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
   char* cmd = buf;
   while (*cmd == ' ') cmd++;
 
+  // MeshCore mobile/desktop apps prefix admin TXT-CLI commands with
+  // "XX|" (2-char hex tag) so they can match responses to requests:
+  //   '0e|get lat'  -> reply '0e|> 52.214'
+  // Without this, the app fails to correlate replies and times out
+  // even though we processed the command. Reflect the prefix verbatim
+  // back into the caller's reply buffer, then advance both pointers
+  // so the rest of the pipeline (CLI handlers below) write past it.
+  if (std::strlen(cmd) > 4 && cmd[2] == '|') {
+    std::memcpy(reply, cmd, 3);
+    reply[3] = '\0';
+    reply += 3;
+    cmd   += 3;
+  }
+
   // ── MyMesh-only verbs (those that simple_repeater handles BEFORE the
   //    fallthrough to CommonCLI). Same shape, minus Heltec-specific stuff
   //    (bridges, ESP-NOW, OLED).
@@ -654,7 +668,10 @@ uint8_t LinuxRepeaterMesh::handleLoginReq(const mesh::Identity& sender,
 uint8_t LinuxRepeaterMesh::handleAnonRegionsReq(const mesh::Identity& /*sender*/,
                                                 uint32_t sender_timestamp,
                                                 const uint8_t* data) {
-  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) return 0;
+  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) {
+    fprintf(stderr, "[anon-rx] regions: rate-limited (max 4/3min) — request dropped\n");
+    return 0;
+  }
   reply_path_len       = *data & 63;
   reply_path_hash_size = (*data >> 6) + 1;
   data++;
@@ -671,7 +688,10 @@ uint8_t LinuxRepeaterMesh::handleAnonRegionsReq(const mesh::Identity& /*sender*/
 uint8_t LinuxRepeaterMesh::handleAnonOwnerReq(const mesh::Identity& /*sender*/,
                                               uint32_t sender_timestamp,
                                               const uint8_t* data) {
-  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) return 0;
+  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) {
+    fprintf(stderr, "[anon-rx] owner: rate-limited (max 4/3min) — request dropped\n");
+    return 0;
+  }
   reply_path_len       = *data & 63;
   reply_path_hash_size = (*data >> 6) + 1;
   data++;
@@ -688,7 +708,10 @@ uint8_t LinuxRepeaterMesh::handleAnonOwnerReq(const mesh::Identity& /*sender*/,
 uint8_t LinuxRepeaterMesh::handleAnonClockReq(const mesh::Identity& /*sender*/,
                                               uint32_t sender_timestamp,
                                               const uint8_t* data) {
-  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) return 0;
+  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) {
+    fprintf(stderr, "[anon-rx] clock: rate-limited (max 4/3min) — request dropped\n");
+    return 0;
+  }
   reply_path_len       = *data & 63;
   reply_path_hash_size = (*data >> 6) + 1;
   data++;
@@ -868,17 +891,33 @@ void LinuxRepeaterMesh::onAnonDataRecv(mesh::Packet* packet, const uint8_t* secr
   std::memcpy(&timestamp, data, 4);
   data[len] = 0;   // ensure null terminator for string compares
 
+  // Diagnostic — see exactly which ANON_REQ subtype the app is sending and
+  // whether it's flood or direct. Helps debug "timeout from app" reports.
+  fprintf(stderr, "[anon-rx] from=%02X%02X%02X%02X len=%zu route=%s subtype=0x%02X "
+                  "first='%c'(%d)\n",
+          sender.pub_key[0], sender.pub_key[1], sender.pub_key[2], sender.pub_key[3],
+          len, packet->isRouteFlood() ? "F" : (packet->isRouteDirect() ? "D" : "?"),
+          (unsigned)data[4],
+          (data[4] >= ' ' && data[4] < 127) ? (char)data[4] : '.', (int)data[4]);
+
   reply_path_len = -1;
   uint8_t reply_len = 0;
+  const char* handled_as = "UNHANDLED";
   if (data[4] == 0 || data[4] >= ' ') {
+    handled_as = "LOGIN";
     reply_len = handleLoginReq(sender, secret, timestamp, &data[4], packet->isRouteFlood());
-  } else if (data[4] == ANON_REQ_TYPE_REGIONS && packet->isRouteDirect()) {
+  } else if (data[4] == ANON_REQ_TYPE_REGIONS) {
+    handled_as = "REGIONS";
     reply_len = handleAnonRegionsReq(sender, timestamp, &data[5]);
-  } else if (data[4] == ANON_REQ_TYPE_OWNER && packet->isRouteDirect()) {
+  } else if (data[4] == ANON_REQ_TYPE_OWNER) {
+    handled_as = "OWNER";
     reply_len = handleAnonOwnerReq(sender, timestamp, &data[5]);
-  } else if (data[4] == ANON_REQ_TYPE_BASIC && packet->isRouteDirect()) {
+  } else if (data[4] == ANON_REQ_TYPE_BASIC) {
+    handled_as = "BASIC";
     reply_len = handleAnonClockReq(sender, timestamp, &data[5]);
   }
+  fprintf(stderr, "[anon-rx] handler=%s reply_len=%u reply_path_len=%d\n",
+          handled_as, reply_len, (int)reply_path_len);
   if (reply_len == 0) return;
 
   if (packet->isRouteFlood()) {
