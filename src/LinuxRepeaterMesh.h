@@ -166,6 +166,13 @@ public:
   mesh::LocalIdentity& getSelfId() override { return self_id; }
   void  saveIdentity(const mesh::LocalIdentity& new_id) override;
   void  clearStats() override;
+
+  // Region persistence — `region put NAME` mutates _region_map in memory,
+  // then `region save` (or `region default ...`) calls saveRegions(). Without
+  // this override CommonCLI's default returns false and the app shows
+  // "Err - save failed".
+  bool  saveRegions() override;
+  void  onDefaultRegionChanged(const RegionEntry* r) override;
   void  applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr,
                              int timeout_mins) override;
 

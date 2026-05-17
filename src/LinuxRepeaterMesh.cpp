@@ -439,6 +439,23 @@ void LinuxRepeaterMesh::clearStats() {
   resetStats();
 }
 
+bool LinuxRepeaterMesh::saveRegions() {
+  if (!_fs) return false;
+  bool ok = region_map.save(_fs);
+  fprintf(stderr, "[repeater] saveRegions() -> %s (%d regions)\n",
+          ok ? "OK" : "FAIL", region_map.getCount());
+  return ok;
+}
+
+void LinuxRepeaterMesh::onDefaultRegionChanged(const RegionEntry* r) {
+  // Refresh the default transport scope so outgoing flood replies are
+  // tagged correctly. We don't keep a `default_scope` field separately
+  // (sendFloodReply derives scope from recv_pkt_region on the wire),
+  // so just log for now — region change still takes effect via save().
+  fprintf(stderr, "[repeater] default region -> %s\n",
+          r ? r->name : "<null>");
+}
+
 // ── CLI bridge ────────────────────────────────────────────────────────
 
 void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
