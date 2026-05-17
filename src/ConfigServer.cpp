@@ -16,9 +16,10 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
 <title>meshcore-linux — Repeater Setup</title>
 <style>
  :root {
-   --bg:#0f1626; --panel:#171f33; --panel2:#1d2640; --line:#2a3450;
-   --txt:#e7ecf7; --muted:#8c96ad; --acc:#7ec4ff; --ok:#7dd28b; --err:#ff7b72;
-   --warn:#ffb347; --btn-bg:#3aa0e6; --btn-fg:#0a121f;
+   /* Monochrome dark — pure black/gray palette, no blue accent. */
+   --bg:#0a0a0a; --panel:#1a1a1a; --panel2:#222; --line:#333;
+   --txt:#e8e8e8; --muted:#888; --acc:#bdbdbd; --ok:#cfcfcf; --err:#ff8a80;
+   --warn:#e6c069; --btn-bg:#2e2e2e; --btn-fg:#f5f5f5;
  }
  *{box-sizing:border-box}
  body{margin:0;padding:0;background:var(--bg);color:var(--txt);
@@ -32,9 +33,10 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
  header.top h1{font-size:1.1em;margin:0;flex:0 0 auto}
  header.top .status{flex:1 1 auto;color:var(--muted);font-size:.85em;font-family:ui-monospace,Menlo,Consolas,monospace}
  header.top .status .dot{display:inline-block;width:.7em;height:.7em;border-radius:50%;
-                         background:var(--muted);margin-right:.3em;vertical-align:.05em}
- header.top .status .dot.ok{background:var(--ok)}
- header.top .status .dot.err{background:var(--err)}
+                         background:#444;margin-right:.3em;vertical-align:.05em;
+                         border:1px solid #555}
+ header.top .status .dot.ok{background:#cfcfcf;border-color:#eee}
+ header.top .status .dot.err{background:var(--err);border-color:#a33}
 
  /* ── tabs ──────────────────────────────────────────────────────────── */
  nav.tabs{position:sticky;top:0;z-index:4;display:flex;gap:.3em;
@@ -49,7 +51,8 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
  .panel.active{display:block}
 
  /* ── form widgets ──────────────────────────────────────────────────── */
- h2{font-size:1.15em;margin:1.3em 0 .3em;color:var(--acc)}
+ h2{font-size:1.15em;margin:1.3em 0 .3em;color:#fff;font-weight:600;
+    border-bottom:1px solid var(--line);padding-bottom:.2em}
  h2:first-child{margin-top:.4em}
  .desc{color:var(--muted);font-size:.9em;margin:.2em 0 .8em}
  label{display:block;color:var(--muted);font-size:.85em;margin:.7em 0 .25em}
@@ -68,19 +71,22 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
  .toggle .copy .desc{margin:.15em 0 0;font-size:.85em}
  .switch{position:relative;width:48px;height:26px;flex:0 0 auto}
  .switch input{opacity:0;width:0;height:0}
- .slider{position:absolute;cursor:pointer;inset:0;background:#3a4566;border-radius:26px;transition:.2s}
- .slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
- input:checked + .slider{background:var(--acc)}
- input:checked + .slider:before{transform:translateX(22px)}
+ .slider{position:absolute;cursor:pointer;inset:0;background:#444;border-radius:26px;transition:.2s}
+ .slider:before{position:absolute;content:"";height:20px;width:20px;left:3px;top:3px;background:#bbb;border-radius:50%;transition:.2s}
+ input:checked + .slider{background:#777}
+ input:checked + .slider:before{background:#fff;transform:translateX(22px)}
  details{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.4em .9em;margin-top:1em}
  details summary{cursor:pointer;color:var(--acc);font-weight:600;padding:.4em 0}
  details[open] summary{margin-bottom:.4em}
 
  /* ── buttons ───────────────────────────────────────────────────────── */
- .btn{padding:.6em 1.05em;border:0;border-radius:8px;cursor:pointer;font-size:.92em;font-weight:600;font-family:inherit}
- .btn-primary{background:var(--btn-bg);color:var(--btn-fg)}
- .btn-secondary{background:transparent;color:var(--acc);border:1px solid var(--acc)}
- .btn-danger{background:#c4564a;color:#fff}
+ .btn{padding:.6em 1.05em;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:.92em;font-weight:600;font-family:inherit}
+ .btn-primary{background:#3a3a3a;color:#fff;border-color:#4a4a4a}
+ .btn-primary:hover{background:#4a4a4a}
+ .btn-secondary{background:transparent;color:var(--txt);border:1px solid var(--line)}
+ .btn-secondary:hover{background:var(--panel)}
+ .btn-danger{background:transparent;color:var(--err);border:1px solid #4a2a2a}
+ .btn-danger:hover{background:#1f1414}
 
  /* ── sticky bottom save bar ────────────────────────────────────────── */
  .savebar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);
@@ -96,15 +102,15 @@ static const char* INDEX_HTML = R"HTML(<!DOCTYPE html>
              white-space:pre-wrap;color:var(--muted);max-height:14em;overflow:auto;margin-top:.5em}
 
  /* ── terminal ──────────────────────────────────────────────────────── */
- .term{background:#06090f;border:1px solid var(--line);border-radius:8px;padding:.6em .8em;
-       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em;color:#cfe3ff;
+ .term{background:#000;border:1px solid var(--line);border-radius:8px;padding:.6em .8em;
+       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em;color:#d8d8d8;
        height:50vh;min-height:18em;overflow-y:scroll;white-space:pre-wrap;line-height:1.35}
- .term .cmd{color:#ffd479}
- .term .ans{color:#7dd28b}
- .term .err{color:#ff7b72}
- .term .sys{color:#8c96ad;font-style:italic}
+ .term .cmd{color:#fff;font-weight:600}
+ .term .ans{color:#bdbdbd}
+ .term .err{color:var(--err)}
+ .term .sys{color:#666;font-style:italic}
  .term-input{display:flex;gap:.5em;margin-top:.6em}
- .term-input input{flex:1 1 auto;background:#06090f;border-color:var(--line);
+ .term-input input{flex:1 1 auto;background:#000;border-color:var(--line);color:#d8d8d8;
                    font-family:ui-monospace,Menlo,Consolas,monospace}
  .term-tools{display:flex;gap:.5em;margin-top:.5em;justify-content:flex-end}
 
