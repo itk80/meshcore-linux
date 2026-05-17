@@ -4,11 +4,19 @@
     "port": 5055,
     "token": ""
   },
+  "identity": {
+    "pub": "",
+    "prv": ""
+  },
   "node": {
     "name": "MeshCore-Linux Repeater",
-    "admin_password": "password"
+    "lat": 0.0,
+    "lon": 0.0,
+    "admin_password": "password",
+    "guest_password": ""
   },
   "lora": {
+    "preset": "EU/UK (Narrow)",
     "freq_mhz": 869.618,
     "bw_khz": 62.5,
     "sf": 8,
@@ -16,6 +24,21 @@
     "tx_power_dbm": 22,
     "syncword": 18,
     "preamble_len": 16
+  },
+  "repeater": {
+    "duty_cycle_pct": 50,
+    "advert_interval_min": 0,
+    "flood_advert_interval_h": 0,
+    "flood_max_hops": 64,
+    "large_mesh_optim": false,
+    "loop_detect": "minimal",
+    "path_hash_mode": 1,
+    "interference_threshold": 0,
+    "agc_reset_interval": 0,
+    "rx_delay_base": 0.0,
+    "tx_delay_factor": 0.5,
+    "direct_tx_delay_factor": 0.3,
+    "multi_acks": false
   },
   "config_api": {
     "port": 8080,
