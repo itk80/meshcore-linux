@@ -7,7 +7,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/meshcore-linux /etc/Meshcore-Linux/config.json
-Restart=on-failure
+# `always` (not on-failure) so that intentional clean exits — operator
+# clicking Reboot in the UI, `reboot` CLI verb, LinuxMainBoard::reboot()
+# — also bring the service back automatically. exit(0) is how the binary
+# signals "I'm done, please restart me" since we have no in-process
+# self-restart on Linux.
+Restart=always
 RestartSec=5s
 # stdout/stderr go to systemd-journal — `journalctl -fu Meshcore-Linux` to follow.
 StandardOutput=journal
