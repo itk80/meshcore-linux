@@ -107,6 +107,10 @@ LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, LinuxTcpRadio& radio,
   _prefs.flood_max = 64;
   _prefs.adc_multiplier = 0.0f;
   _prefs.path_hash_mode = 0;
+  // Advert must carry lat/lon from _prefs (no GPS sensor on Linux), otherwise
+  // mobile/desktop clients show the repeater at (0,0) — the map centres on
+  // the Pacific (near New Zealand) instead of where the operator set it.
+  _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
 }
 
 // ── bringUp: load/generate IDENTITY first, then persistence + Dispatcher ──
@@ -221,6 +225,14 @@ void LinuxRepeaterMesh::seedPrefsFromConfig(const std::string& name,
   }
   if (_prefs.guest_password[0] == '\0' && !guest_password.empty()) {
     std::snprintf(_prefs.guest_password, sizeof(_prefs.guest_password), "%s", guest_password.c_str());
+    dirty = true;
+  }
+  // Upgrade path — old com_prefs blobs persisted from an earlier build will
+  // have advert_loc_policy == 0 (NONE). Without GPS sensor that means adverts
+  // never carry the operator-set lat/lon. Flip to PREFS on first boot after
+  // upgrade so the mobile map shows the right location.
+  if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
+    _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
     dirty = true;
   }
   if (dirty) savePrefs();
