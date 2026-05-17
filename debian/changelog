@@ -1,3 +1,15 @@
+meshcore-linux (1.0.1-1) unstable; urgency=medium
+
+  * Add interop test harness: `make test` runs the pymc_proto.h unit
+    suite (CRC vectors, frame round-trips, RX/TX/Noise decoders, airtime
+    math); `make interop` boots the binary against a Python mock
+    pymc_usb modem and verifies a signed self-advert end-to-end
+    (Ed25519 signature over pub+timestamp+app_data). Wired into CI.
+  * release.yml: strip leading 'v' from the version in the install
+    snippet on the release notes.
+
+ -- itk80 <i.t.keny@gmail.com>  Sun, 17 May 2026 20:47:00 +0200
+
 meshcore-linux (1.0.0-1) unstable; urgency=medium
 
   * First public release.
