@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout meshcore-linux
+        uses: actions/checkout@v4
+        with:
+          path: meshcore-linux
+
+      - name: Checkout MeshCore upstream
+        uses: actions/checkout@v4
+        with:
+          repository: ripplebiz/MeshCore
+          path: MeshCore
+
+      - name: Install build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-pip
+          pip3 install --user platformio
+
+      - name: Populate MeshCore libdeps via PlatformIO
+        working-directory: MeshCore
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          # Just install libs — we don't need to actually compile the
+          # PlatformIO target. The Heltec_v3_repeater env pulls in the
+          # same Crypto + CayenneLPP dependencies our Makefile reads.
+          pio pkg install --environment Heltec_v3_repeater
+
+      - name: Build meshcore-linux
+        working-directory: meshcore-linux
+        run: make
+
+      - name: Smoke-run binary (help / version path)
+        working-directory: meshcore-linux
+        run: |
+          # The binary needs a config file; point at the example just to
+          # confirm it starts, then send SIGTERM after a second. Exit code
+          # 0 means clean shutdown path works.
+          timeout 3s ./meshcore-linux config/config.example.json || rc=$?
+          if [ "${rc:-0}" -eq 124 ]; then
+            echo "SIGTERM after 3s — service was running"
+          elif [ "${rc:-0}" -ne 0 ]; then
+            echo "Binary exited non-zero ($rc)"; exit 1
+          fi

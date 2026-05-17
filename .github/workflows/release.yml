@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # for softprops/action-gh-release
+
+jobs:
+  deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout meshcore-linux
+        uses: actions/checkout@v4
+        with:
+          path: meshcore-linux
+
+      - name: Checkout MeshCore upstream
+        uses: actions/checkout@v4
+        with:
+          repository: ripplebiz/MeshCore
+          path: MeshCore
+
+      - name: Install build + packaging tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential debhelper devscripts python3-pip
+          pip3 install --user platformio
+
+      - name: Populate MeshCore libdeps via PlatformIO
+        working-directory: MeshCore
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          pio pkg install --environment Heltec_v3_repeater
+
+      - name: Verify tag matches debian/changelog version
+        working-directory: meshcore-linux
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          DEB_VER=$(dpkg-parsechangelog --show-field Version | sed 's/-.*//')
+          echo "tag=$TAG_VER changelog=$DEB_VER"
+          if [ "$TAG_VER" != "$DEB_VER" ]; then
+            echo "::error::tag $TAG_VER does not match debian/changelog $DEB_VER"
+            exit 1
+          fi
+
+      - name: Build .deb
+        working-directory: meshcore-linux
+        run: dpkg-buildpackage -b -uc -us
+
+      - name: Rename artefact for release
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p out
+          cp meshcore-linux_*_${{ matrix.arch }}.deb out/
+          ls -la out/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.deb
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            ```bash
+            ARCH=$(dpkg --print-architecture)   # amd64 or arm64
+            wget https://github.com/itk80/meshcore-linux/releases/download/${{ github.ref_name }}/meshcore-linux_${{ github.ref_name }}-1_${ARCH}.deb
+            sudo dpkg -i meshcore-linux_${{ github.ref_name }}-1_*.deb
+            sudo nano /etc/Meshcore-Linux/config.json   # set modem.host
+            sudo systemctl restart Meshcore-Linux
+            ```
+
+            Tail logs with `journalctl -fu Meshcore-Linux`; open the UI
+            at `http://<host>:8080/`.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
