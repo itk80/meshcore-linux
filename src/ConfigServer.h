@@ -1,17 +1,9 @@
 #pragma once
 
-// ConfigServer — HTTP/JSON config + status API on port 5060.
-//
-// Endpoints:
-//   GET  /                  → tiny HTML page (textarea editor + status panel)
-//   GET  /api/config        → current config as JSON
-//   POST /api/config        → replace config, persist to file, hot-apply
-//                             modem endpoint + LoRa params if they changed
-//   GET  /api/status        → runtime status (modem connect/handshake/stats)
-//   POST /api/reboot        → exit(0) — systemd will restart the service
-//
-// No authentication for v1; serve on LAN only. Run on its own thread so the
-// main loop (radio I/O) keeps running while the server handles requests.
+// ConfigServer — HTTP/JSON config + status API (default :8080).
+// Endpoints: GET / (HTML form), GET/POST /api/config, POST /api/command,
+// GET /api/status, POST /api/reboot. No auth — LAN-only. Runs on its
+// own thread so radio I/O in main keeps flowing.
 
 #include "LinuxTcpRadio.h"
 #include <nlohmann_json.hpp>

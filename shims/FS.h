@@ -1,10 +1,7 @@
 #pragma once
-// FS.h — minimal Arduino FS/SPIFFS/LittleFS shim backed by POSIX stdio.
-//
-// IdentityStore / ClientACL / CommonCLI take a `FILESYSTEM&` and use it to
-// open/read/write/remove small binary blobs (identity, prefs, contacts).
-// We model just enough of the Arduino `File` + `FILESYSTEM` API to keep
-// MeshCore's persistence code happy on Linux.
+// FS.h — Arduino FS/SPIFFS/LittleFS shim backed by POSIX stdio.
+// Just enough of the `File` + `FILESYSTEM` API for MeshCore's
+// IdentityStore / ClientACL / CommonCLI persistence.
 
 #include "Stream.h"
 #include <cstdint>

@@ -1,12 +1,7 @@
 #pragma once
 
-// Vendored from MeshCore/examples/simple_repeater/RateLimiter.h — small enough
-// to keep header-only inside meshcore-linux without pulling the whole
-// simple_repeater example into the Linux build.
-//
-// Sliding-window counter: allow up to `_maximum` events per `_secs` seconds.
-// The window is reset (not slid) when it expires — simple and matches the
-// upstream behaviour exactly.
+// Vendored from MeshCore/examples/simple_repeater/RateLimiter.h.
+// Fixed-window counter: allow `_maximum` events per `_secs` seconds.
 
 #include <stdint.h>
 

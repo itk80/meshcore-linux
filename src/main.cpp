@@ -1,11 +1,5 @@
-// MeshCore-Linux — Phase D.3 full-repeater entry point.
-//
-// Wires:
-//   LinuxTcpRadio         (mesh::Radio impl, pymc_usb wire protocol v0.7)
-//   LinuxRepeaterMesh     (mesh::Mesh + CommonCLICallbacks impl — full repeater)
-//   LinuxMainBoard/RTC/Millis/RNG  (host abstractions)
-//   StaticPoolPacketManager + SimpleMeshTables
-//   ConfigServer           (HTTP/JSON on configurable port — default 8080)
+// MeshCore-Linux entry point — wires LinuxTcpRadio (pymc_usb wire
+// protocol v0.7), LinuxRepeaterMesh, host abstractions and ConfigServer.
 
 #include "LinuxTcpRadio.h"
 #include "LinuxPlatform.h"

@@ -1,13 +1,8 @@
 #pragma once
 
 // PosixArduinoCompat.h — minimal Arduino-API shim for meshcore-linux.
-// Provides the subset of the Arduino API we need to drive the pymc_usb wire
-// protocol on a POSIX host (or to integrate any future Arduino-derived code
-// that only needs millis/delay/Serial/esp_random and a WiFiClient).
-//
-// Header-only and entirely guarded by `#if !ARDUINO` so it stays out of the
-// way on the embedded side. The corresponding ESP32 firmware in MeshCore-tcp
-// is untouched by this — meshcore-linux owns all the Linux glue.
+// Header-only, guarded by `#if !ARDUINO`. Exposes the subset MeshCore
+// needs on a POSIX host: millis/delay/Serial/esp_random/WiFiClient.
 
 #if !defined(ARDUINO) && !defined(ESP32) && !defined(ARDUINO_ARCH_ESP32)
 
@@ -111,12 +106,9 @@ static inline uint32_t esp_random() {
   return r;
 }
 
-// ── WiFiClient (POSIX socket, mimics ESP32 Arduino WiFiClient subset) ─
-// Subset matching what CustomTCPRadioWrapper uses on ESP32: connect /
-// connected / available / read / write / stop / setNoDelay / fd.
-// read() returns a single byte (Stream-style) or -1 if would-block.
-// stop() forces TCP RST via SO_LINGER={1,0} so a single-client server
-// (the pymc_usb modem) frees its slot the instant we drop.
+// WiFiClient (POSIX socket) — connect/connected/available/read/write/
+// stop/setNoDelay/fd. read() is byte-at-a-time. stop() forces TCP RST
+// via SO_LINGER={1,0} so single-client modems free their slot immediately.
 
 class WiFiClient {
 public:

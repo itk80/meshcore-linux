@@ -1,26 +1,10 @@
 #pragma once
 
-// LinuxRepeaterMesh — full repeater behaviour on Linux.
-//
-// Inherits mesh::Mesh (low-level) + CommonCLICallbacks. Same shape as the
-// ESP32 simple_repeater/MyMesh but stripped of board-specific concerns
-// (OLED, sensors, RS232/ESPNow bridges, GPS, battery, BLE). The repeater
-// surface MeshCore exposes is largely board-agnostic — adverts, ACL,
-// flood-forward decisions, CLI — and ports cleanly.
-//
-// Persistence root: /var/lib/Meshcore-Linux/ (created via FSImpl::begin).
-//   /com_prefs                 NodePrefs blob   (CommonCLI)
-//   /identity                  IdentityStore root (LocalIdentity + name list)
-//   /acl                       ClientACL persistence
-//   /regions                   RegionMap persistence
-//
-// Packet log lives inside the state dir at /var/lib/Meshcore-Linux/packets.log
-// (configurable via setPacketLogPath). Operators can plug logrotate against
-// that path.
-//
-// CLI commands are bridged via processCommand(cmd, reply) — meant to be
-// called from the HTTP /api/command endpoint AND from over-air TXT (admin
-// clients via onPeerDataRecv).
+// LinuxRepeaterMesh — full repeater on Linux. Mirrors the ESP32
+// simple_repeater/MyMesh, minus board-specific bits (OLED, sensors,
+// bridges, GPS, battery, BLE). Persistence under /var/lib/Meshcore-Linux/
+// (com_prefs, identity, acl, regions, packets.log). CLI is bridged via
+// processCommand() from both HTTP /api/command and over-air admin TXT.
 
 #include <Mesh.h>
 #include <cstdio>
@@ -167,10 +151,8 @@ public:
   void  saveIdentity(const mesh::LocalIdentity& new_id) override;
   void  clearStats() override;
 
-  // Region persistence — `region put NAME` mutates _region_map in memory,
-  // then `region save` (or `region default ...`) calls saveRegions(). Without
-  // this override CommonCLI's default returns false and the app shows
-  // "Err - save failed".
+  // Region persistence — without these overrides CommonCLI's default
+  // returns false and 'region save' surfaces "Err - save failed".
   bool  saveRegions() override;
   void  onDefaultRegionChanged(const RegionEntry* r) override;
   void  applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr,

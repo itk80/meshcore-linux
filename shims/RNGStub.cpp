@@ -1,13 +1,6 @@
-// RNGStub.cpp — linker shim for the rweather/Crypto library on Linux.
-//
-// Crypto's real RNG.cpp wants <Arduino.h> for ESP32 hardware bits, but
-// MeshCore never invokes the codepaths that touch RNGClass (only the
-// deterministic Ed25519::verify is used). Providing no-op definitions
-// satisfies the linker without dragging in Arduino glue.
-//
-// If/when meshcore-linux needs real entropy for in-process key generation,
-// we'll either route this stub to getrandom(2) or pass our own RNG to the
-// MeshCore APIs (which already take a mesh::RNG* — see Identity ctor).
+// RNGStub.cpp — linker shim for rweather/Crypto on Linux.
+// MeshCore never calls into RNGClass (only deterministic Ed25519::verify);
+// no-op definitions keep the linker happy without ESP32 Arduino glue.
 
 #include <RNG.h>
 

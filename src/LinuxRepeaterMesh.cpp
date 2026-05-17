@@ -98,13 +98,8 @@ LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, LinuxTcpRadio& radio,
   _prefs.sf   = 8;
   _prefs.cr   = 8;
   _prefs.tx_power_dbm = 22;
-  _prefs.advert_interval = 0;          // DISABLED by default — operator must
-                                       // opt in once they've reviewed identity,
-                                       // node name, region settings. The
-                                       // upstream simple_repeater on ESP32
-                                       // also flips this off after first
-                                       // manual config via savePrefs.
-  _prefs.flood_advert_interval = 0;    // same — disabled until operator opts in
+  _prefs.advert_interval = 0;          // disabled until operator opts in
+  _prefs.flood_advert_interval = 0;
   _prefs.flood_max = 64;
   _prefs.adc_multiplier = 0.0f;
   _prefs.path_hash_mode = 0;
@@ -114,14 +109,10 @@ LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, LinuxTcpRadio& radio,
   _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
 }
 
-// ── bringUp: load/generate IDENTITY first, then persistence + Dispatcher ──
-//
-// CRITICAL ordering: mesh::Mesh::self_id MUST be a real keypair BEFORE we
-// emit anything (advert, ack, reply). Default-constructed LocalIdentity is
-// all-zeros pubkey/prvkey — that pollutes other nodes' contact tables and
-// corrupts mesh routing. Identity is read from /etc/Meshcore-Linux/config.json
-// (the operator never sees this dance after first boot: lazy-generated and
-// callback-persisted on the very first start, preserved across reinstalls).
+// bringUp loads/generates the Ed25519 identity BEFORE any send — a zero
+// keypair would pollute neighbours' contact tables. Identity lives in
+// /etc/Meshcore-Linux/config.json; first boot generates + persists via
+// callback, reinstalls preserve it.
 
 static bool parseHex(const std::string& s, uint8_t* out, size_t expected_len) {
   if (s.size() != expected_len * 2) return false;
@@ -232,10 +223,8 @@ void LinuxRepeaterMesh::seedPrefsFromConfig(const std::string& name,
     std::snprintf(_prefs.guest_password, sizeof(_prefs.guest_password), "%s", guest_password.c_str());
     dirty = true;
   }
-  // Upgrade path — old com_prefs blobs persisted from an earlier build will
-  // have advert_loc_policy == 0 (NONE). Without GPS sensor that means adverts
-  // never carry the operator-set lat/lon. Flip to PREFS on first boot after
-  // upgrade so the mobile map shows the right location.
+  // Upgrade fix: pre-fix com_prefs had advert_loc_policy=NONE, so adverts
+  // shipped without lat/lon. Flip to PREFS on first boot after upgrade.
   if (_prefs.advert_loc_policy == ADVERT_LOC_NONE) {
     _prefs.advert_loc_policy = ADVERT_LOC_PREFS;
     dirty = true;
@@ -465,10 +454,8 @@ bool LinuxRepeaterMesh::saveRegions() {
 }
 
 void LinuxRepeaterMesh::onDefaultRegionChanged(const RegionEntry* r) {
-  // Refresh the default transport scope so outgoing flood replies are
-  // tagged correctly. We don't keep a `default_scope` field separately
-  // (sendFloodReply derives scope from recv_pkt_region on the wire),
-  // so just log for now — region change still takes effect via save().
+  // Scope is derived per-reply from recv_pkt_region (see sendFloodReply),
+  // so we don't cache default_scope here — just log the change.
   fprintf(stderr, "[repeater] default region -> %s\n",
           r ? r->name : "<null>");
 }
@@ -483,13 +470,8 @@ void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
   char* cmd = buf;
   while (*cmd == ' ') cmd++;
 
-  // MeshCore mobile/desktop apps prefix admin TXT-CLI commands with
-  // "XX|" (2-char hex tag) so they can match responses to requests:
-  //   '0e|get lat'  -> reply '0e|> 52.214'
-  // Without this, the app fails to correlate replies and times out
-  // even though we processed the command. Reflect the prefix verbatim
-  // back into the caller's reply buffer, then advance both pointers
-  // so the rest of the pipeline (CLI handlers below) write past it.
+  // MeshCore clients tag admin CLI cmds with "XX|" so they can correlate
+  // replies. Reflect the prefix verbatim — see MyMesh::handleCommand.
   if (std::strlen(cmd) > 4 && cmd[2] == '|') {
     std::memcpy(reply, cmd, 3);
     reply[3] = '\0';
@@ -545,16 +527,9 @@ void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
     return;
   }
 
-  // Fallthrough — common verbs (set/get freq, tx, radio, name, lat, lon,
-  // password, advert.interval, flood.advert.interval, flood.max, dutycycle,
-  // af, rxdelay, txdelay, direct.txdelay, int.thresh, agc.reset.interval,
-  // multi.acks, loop.detect, path.hash.mode, public.key, owner.info,
-  // neighbors, stats-core, stats-radio, stats-packets, ver, role, advert,
-  // flood.advert, log start/stop/erase, …).
-
-  // Snapshot LoRa-affecting fields BEFORE the CLI runs so we can hot-apply
-  // changes to the modem (CommonCLI's `set radio` / `set tx` write into
-  // _prefs and reply "reboot to apply" — we make it actually apply now).
+  // CommonCLI handles the rest (set/get freq, tx, name, advert.interval, …).
+  // Snapshot LoRa-affecting fields first so we can hot-apply post-CLI:
+  // CommonCLI replies "reboot to apply" but we push live to the modem.
   float    pre_freq = _prefs.freq;
   float    pre_bw   = _prefs.bw;
   uint8_t  pre_sf   = _prefs.sf;
@@ -627,12 +602,9 @@ void LinuxRepeaterMesh::tick() {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// Remote management over LoRa — ported from examples/simple_repeater/MyMesh.cpp.
-// All wire formats preserved bit-identically so MeshCore mobile/desktop
-// clients (which speak this protocol against any repeater) can log in to
-// the Linux instance, query stats/neighbours, change ACL etc. over LoRa.
-// ════════════════════════════════════════════════════════════════════════
+// Remote management over LoRa — wire-compatible port of
+// examples/simple_repeater/MyMesh handlers (login, stats, neighbours,
+// ACL, regions). MeshCore mobile/desktop clients work unchanged.
 
 int LinuxRepeaterMesh::searchPeersByHash(const uint8_t* hash) {
   int n = 0;
@@ -1139,11 +1111,8 @@ void LinuxRepeaterMesh::eraseLogFile() {
 }
 
 void LinuxRepeaterMesh::dumpLogFile() {
-  // CommonCLI invokes this when `log dump` runs from CLI; on MeshCore the
-  // upstream implementation streams the file over the Serial CLI. We don't
-  // have a direct way to stream into the caller's reply buffer here (the
-  // CommonCLI dump uses its own line writer), so log to stderr — operators
-  // can `journalctl -u Meshcore-Linux` to read.
+  // Dumps to stderr (journalctl) — CommonCLI's dump doesn't fit the
+  // request/reply buffer model.
   FILE* f = std::fopen(_log_path.c_str(), "r");
   if (!f) {
     std::fprintf(stderr, "[repeater] dumpLogFile: cannot open %s\n", _log_path.c_str());

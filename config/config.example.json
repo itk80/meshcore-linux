@@ -18,7 +18,7 @@
     "tx_power_dbm": 22
   },
   "modem": {
-    "host": "192.168.5.2",
+    "host": "modem.local",
     "port": 5055,
     "token": ""
   },

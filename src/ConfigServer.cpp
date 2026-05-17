@@ -538,11 +538,9 @@ void ConfigServer::applyHotReload(const json& prev, const json& next) {
     (uint16_t)json_int(next, "/lora/syncword", 0x0012),
     (uint8_t)json_int(next, "/lora/preamble_len", 16));
 
-  // Node + repeater settings → push to mesh via CLI bridge (which holds the
-  // mesh mutex). We synthesise the same CLI verbs the ESP32 web tool uses,
-  // so MeshCore's CommonCLI parses, validates and persists them into
-  // NodePrefs. Order matters: name/lat/lon first, then LoRa-affecting
-  // verbs, then advert timers (so updateAdvertTimer sees fresh values).
+  // Push node + repeater settings via the CLI bridge. Order matters:
+  // name/lat/lon first, LoRa next, advert timers last (so the new values
+  // are visible to updateAdvertTimer).
   if (!_cli_bridge) return;
   auto cli = [&](const std::string& v) {
     std::string ignored = _cli_bridge(v);
@@ -559,10 +557,9 @@ void ConfigServer::applyHotReload(const json& prev, const json& next) {
   std::string gp = sNode("/node/guest_password");
   if (!gp.empty()) cli("set guest.password " + gp);
 
-  // LoRa params: MeshCore CLI takes all four atomically via `set radio
-  // freq,bw,sf,cr`. Individual `set bw/sf/cr` don't exist — only `set freq`
-  // is split out. We push both: `set radio` for the atomic update + `set
-  // freq` covers the case where only freq changed (older firmware paths).
+  // CLI accepts all four LoRa params atomically via `set radio f,b,s,c`;
+  // there's no separate `set bw/sf/cr`. Also push `set freq` separately
+  // for the older firmware path.
   {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "set radio %g,%g,%d,%d",
@@ -603,10 +600,8 @@ void ConfigServer::route(httplib::Server& s) {
   });
 
   s.Get("/api/config", [this](const httplib::Request&, httplib::Response& res) {
-    // Start from on-disk config (modem endpoint, identity, anything not in
-    // _prefs). Then let the live-overlay callback (wired in main.cpp) refresh
-    // node/lora/repeater scalars from current NodePrefs — so values changed
-    // via CLI bridge OR over LoRa from the mobile app show up here.
+    // On-disk config first, then overlay live NodePrefs so values changed
+    // via CLI bridge or over LoRa surface here too.
     nlohmann::json out;
     {
       std::lock_guard<std::mutex> lk(_config_mu);
