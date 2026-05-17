@@ -13,6 +13,7 @@ CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter \
             -Wno-reorder-ctor -Wno-unused-result -Wno-sign-compare \
             -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+            -DMAX_CLIENTS=32 -DMAX_NEIGHBOURS=32 \
             -include cstddef -include cstdint -include cstring -include cstdio \
             -include shims/Arduino.h -include shims/FS.h \
             -Ishims \

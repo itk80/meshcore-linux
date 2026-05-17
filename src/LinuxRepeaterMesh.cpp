@@ -1,11 +1,51 @@
 #include "LinuxRepeaterMesh.h"
 #include <Utils.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <sys/stat.h>
 
 using namespace mesh;
+
+// Protocol constants — port of MyMesh.cpp #defines so the wire format we
+// expose to remote clients (MeshCore mobile/desktop app) is bit-identical.
+#ifndef SERVER_RESPONSE_DELAY
+  #define SERVER_RESPONSE_DELAY     300
+#endif
+#ifndef TXT_ACK_DELAY
+  #define TXT_ACK_DELAY             200
+#endif
+#define CLI_REPLY_DELAY_MILLIS      600
+#define FIRMWARE_VER_LEVEL          2
+
+#define REQ_TYPE_GET_STATUS         0x01
+#define REQ_TYPE_KEEP_ALIVE         0x02
+#define REQ_TYPE_GET_TELEMETRY_DATA 0x03
+#define REQ_TYPE_GET_ACCESS_LIST    0x05
+#define REQ_TYPE_GET_NEIGHBOURS     0x06
+#define REQ_TYPE_GET_OWNER_INFO     0x07
+
+#define ANON_REQ_TYPE_REGIONS       0x01
+#define ANON_REQ_TYPE_OWNER         0x02
+#define ANON_REQ_TYPE_BASIC         0x03
+
+#ifndef RESP_SERVER_LOGIN_OK
+  #define RESP_SERVER_LOGIN_OK      0
+#endif
+#ifndef TXT_TYPE_PLAIN
+  #define TXT_TYPE_PLAIN            0
+#endif
+#ifndef TXT_TYPE_CLI_DATA
+  #define TXT_TYPE_CLI_DATA         1
+#endif
+
+#define LAZY_CONTACTS_WRITE_DELAY   5000
+
+// CTL message subtypes (high nibble) shared with simple_repeater.
+#define CTL_TYPE_NODE_DISCOVER_REQ  0x80
+#define CTL_TYPE_NODE_DISCOVER_RESP 0x90
 
 // ── Construction ──────────────────────────────────────────────────────
 
@@ -21,9 +61,23 @@ LinuxRepeaterMesh::LinuxRepeaterMesh(MainBoard& board, LinuxTcpRadio& radio,
     region_map(key_store),
     _cli(board, rtc, sensors, region_map, acl, &_prefs, this),
     _logging(false),
+    // Packet log lives under StateDirectory so the systemd unit's
+    // ProtectSystem=strict ReadWritePaths covers it without a second
+    // ReadWritePaths entry. Operators can rotate it with logrotate by path.
+    _log_path("/var/lib/Meshcore-Linux/packets.log"),
     next_local_advert(0),
-    next_flood_advert(0)
+    next_flood_advert(0),
+    dirty_contacts_expiry(0),
+    reply_path_len(-1),
+    reply_path_hash_size(1),
+    recv_pkt_region(nullptr),
+    // Match MyMesh upstream: max 4 anon requests / 3 min, 4 discover / 2 min.
+    anon_limiter(4, 180),
+    discover_limiter(4, 120),
+    pending_discover_tag(0),
+    pending_discover_until(0)
 {
+  std::memset(matching_peer_indexes, 0, sizeof(matching_peer_indexes));
 #if MAX_NEIGHBOURS
   memset(neighbours, 0, sizeof(neighbours));
 #endif
@@ -189,9 +243,62 @@ uint32_t LinuxRepeaterMesh::getDirectRetransmitDelay(const mesh::Packet* packet)
   return (uint32_t)(toa * _prefs.direct_tx_delay_factor);
 }
 
+// Loop-counter maximums per path-hash-size (1/2/3-byte). Ported verbatim from
+// MyMesh.cpp — once self-id appears N times in the path, drop the packet to
+// keep flood loops from spreading. STRICT is the safest, MINIMAL the loosest.
+static const uint8_t MAX_LOOP_MINIMAL[]  = { 0, 4, 2, 1 };
+static const uint8_t MAX_LOOP_MODERATE[] = { 0, 2, 1, 1 };
+static const uint8_t MAX_LOOP_STRICT[]   = { 0, 1, 1, 1 };
+
+bool LinuxRepeaterMesh::isLooped(const mesh::Packet* packet,
+                                 const uint8_t max_counters[]) {
+  uint8_t hash_size  = packet->getPathHashSize();
+  uint8_t hash_count = packet->getPathHashCount();
+  uint8_t n = 0;
+  const uint8_t* path = packet->path;
+  while (hash_count > 0) {
+    if (self_id.isHashMatch(path, hash_size)) n++;
+    hash_count--;
+    path += hash_size;
+  }
+  return n >= max_counters[hash_size];
+}
+
+bool LinuxRepeaterMesh::filterRecvFloodPacket(mesh::Packet* pkt) {
+  // Determine the region scope for this incoming flood packet so
+  // allowPacketForward() can later decide whether we're allowed to
+  // re-flood it (region rules can DENY_FLOOD on a per-transport basis).
+  if (pkt->getRouteType() == ROUTE_TYPE_TRANSPORT_FLOOD) {
+    recv_pkt_region = region_map.findMatch(pkt, REGION_DENY_FLOOD);
+  } else if (pkt->getRouteType() == ROUTE_TYPE_FLOOD) {
+    if (region_map.getWildcard().flags & REGION_DENY_FLOOD) {
+      recv_pkt_region = nullptr;
+    } else {
+      recv_pkt_region = &region_map.getWildcard();
+    }
+  } else {
+    recv_pkt_region = nullptr;
+  }
+  return false;   // normal processing continues
+}
+
 bool LinuxRepeaterMesh::allowPacketForward(const mesh::Packet* packet) {
   if (_prefs.disable_fwd) return false;
   if (packet->isRouteFlood() && packet->getPathHashCount() >= _prefs.flood_max) return false;
+  if (packet->isRouteFlood() && recv_pkt_region == nullptr) {
+    // No matching region (or wildcard explicitly denies flooding) — drop.
+    return false;
+  }
+  if (packet->isRouteFlood() && _prefs.loop_detect != LOOP_DETECT_OFF) {
+    const uint8_t* maxima;
+    if      (_prefs.loop_detect == LOOP_DETECT_MINIMAL)  maxima = MAX_LOOP_MINIMAL;
+    else if (_prefs.loop_detect == LOOP_DETECT_MODERATE) maxima = MAX_LOOP_MODERATE;
+    else                                                 maxima = MAX_LOOP_STRICT;
+    if (isLooped(packet, maxima)) {
+      fprintf(stderr, "[repeater] flood loop detected, dropping packet\n");
+      return false;
+    }
+  }
   return true;
 }
 
@@ -421,7 +528,6 @@ void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
 void LinuxRepeaterMesh::tick() {
   mesh::Mesh::loop();   // drives Dispatcher (radio.loop / recv / send)
 
-  unsigned long now = _ms->getMillis();
   if (next_local_advert > 0 && millisHasNowPassed(next_local_advert)) {
     sendSelfAdvertisement(0, false);
     updateAdvertTimer();
@@ -430,5 +536,542 @@ void LinuxRepeaterMesh::tick() {
     sendSelfAdvertisement(0, true);
     updateFloodAdvertTimer();
   }
-  (void)now;
+  if (dirty_contacts_expiry != 0 && millisHasNowPassed(dirty_contacts_expiry)) {
+    if (_fs) acl.save(_fs);
+    dirty_contacts_expiry = 0;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Remote management over LoRa — ported from examples/simple_repeater/MyMesh.cpp.
+// All wire formats preserved bit-identically so MeshCore mobile/desktop
+// clients (which speak this protocol against any repeater) can log in to
+// the Linux instance, query stats/neighbours, change ACL etc. over LoRa.
+// ════════════════════════════════════════════════════════════════════════
+
+int LinuxRepeaterMesh::searchPeersByHash(const uint8_t* hash) {
+  int n = 0;
+  for (int i = 0; i < acl.getNumClients(); i++) {
+    if (acl.getClientByIdx(i)->id.isHashMatch(hash)) {
+      matching_peer_indexes[n++] = i;
+      if (n >= MAX_CLIENTS) break;
+    }
+  }
+  return n;
+}
+
+void LinuxRepeaterMesh::getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) {
+  int i = matching_peer_indexes[peer_idx];
+  if (i >= 0 && i < acl.getNumClients()) {
+    std::memcpy(dest_secret, acl.getClientByIdx(i)->shared_secret, PUB_KEY_SIZE);
+  }
+}
+
+uint8_t LinuxRepeaterMesh::handleLoginReq(const mesh::Identity& sender,
+                                          const uint8_t* secret,
+                                          uint32_t sender_timestamp,
+                                          const uint8_t* data, bool is_flood) {
+  ClientInfo* client = nullptr;
+  if (data[0] == 0) {   // blank password → keep existing ACL entry, if any
+    client = acl.getClient(sender.pub_key, PUB_KEY_SIZE);
+  }
+  if (client == nullptr) {
+    uint8_t perms;
+    if (std::strcmp((const char*)data, _prefs.password) == 0) {
+      perms = PERM_ACL_ADMIN;
+    } else if (std::strcmp((const char*)data, _prefs.guest_password) == 0) {
+      perms = PERM_ACL_GUEST;
+    } else {
+      return 0;   // bad password
+    }
+    client = acl.putClient(sender, 0);
+    if (client == nullptr || sender_timestamp <= client->last_timestamp) {
+      // Table full -or- replay attack.
+      return 0;
+    }
+    client->last_timestamp = sender_timestamp;
+    client->last_activity  = getRTCClock()->getCurrentTime();
+    client->permissions = (client->permissions & ~PERM_ACL_ROLE_MASK) | perms;
+    std::memcpy(client->shared_secret, secret, PUB_KEY_SIZE);
+    if (perms != PERM_ACL_GUEST) {
+      // Persist after a short coalescing delay (multiple logins in a burst
+      // shouldn't each cost a file write).
+      dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
+    }
+  }
+  if (is_flood) {
+    client->out_path_len = OUT_PATH_UNKNOWN;   // force path rediscovery
+  }
+
+  uint32_t now = getRTCClock()->getCurrentTimeUnique();
+  std::memcpy(reply_data, &now, 4);
+  reply_data[4] = RESP_SERVER_LOGIN_OK;
+  reply_data[5] = 0;     // legacy: keep-alive interval (deprecated)
+  reply_data[6] = client->isAdmin() ? 1 : 0;
+  reply_data[7] = client->permissions;
+  getRNG()->random(&reply_data[8], 4);   // entropy for packet-hash uniqueness
+  reply_data[12] = FIRMWARE_VER_LEVEL;
+  return 13;
+}
+
+uint8_t LinuxRepeaterMesh::handleAnonRegionsReq(const mesh::Identity& /*sender*/,
+                                                uint32_t sender_timestamp,
+                                                const uint8_t* data) {
+  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) return 0;
+  reply_path_len       = *data & 63;
+  reply_path_hash_size = (*data >> 6) + 1;
+  data++;
+  std::memcpy(reply_path, data, (uint8_t)reply_path_len * reply_path_hash_size);
+
+  std::memcpy(reply_data, &sender_timestamp, 4);
+  uint32_t now = getRTCClock()->getCurrentTime();
+  std::memcpy(&reply_data[4], &now, 4);
+  return 8 + region_map.exportNamesTo((char*)&reply_data[8],
+                                      sizeof(reply_data) - 12,
+                                      REGION_DENY_FLOOD);
+}
+
+uint8_t LinuxRepeaterMesh::handleAnonOwnerReq(const mesh::Identity& /*sender*/,
+                                              uint32_t sender_timestamp,
+                                              const uint8_t* data) {
+  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) return 0;
+  reply_path_len       = *data & 63;
+  reply_path_hash_size = (*data >> 6) + 1;
+  data++;
+  std::memcpy(reply_path, data, (uint8_t)reply_path_len * reply_path_hash_size);
+
+  std::memcpy(reply_data, &sender_timestamp, 4);
+  uint32_t now = getRTCClock()->getCurrentTime();
+  std::memcpy(&reply_data[4], &now, 4);
+  std::snprintf((char*)&reply_data[8], sizeof(reply_data) - 8, "%s\n%s",
+                _prefs.node_name, _prefs.owner_info);
+  return 8 + (uint8_t)std::strlen((char*)&reply_data[8]);
+}
+
+uint8_t LinuxRepeaterMesh::handleAnonClockReq(const mesh::Identity& /*sender*/,
+                                              uint32_t sender_timestamp,
+                                              const uint8_t* data) {
+  if (!anon_limiter.allow(getRTCClock()->getCurrentTime())) return 0;
+  reply_path_len       = *data & 63;
+  reply_path_hash_size = (*data >> 6) + 1;
+  data++;
+  std::memcpy(reply_path, data, (uint8_t)reply_path_len * reply_path_hash_size);
+
+  std::memcpy(reply_data, &sender_timestamp, 4);
+  uint32_t now = getRTCClock()->getCurrentTime();
+  std::memcpy(&reply_data[4], &now, 4);
+  reply_data[8] = 0;                                 // features (no bridges on Linux)
+  if (_prefs.disable_fwd) reply_data[8] |= 0x80;     // is disabled
+  return 9;
+}
+
+int LinuxRepeaterMesh::handleRequest(ClientInfo* sender, uint32_t sender_timestamp,
+                                     uint8_t* payload, size_t payload_len) {
+  // Reflect sender's timestamp back as a tag — also helps with packet-hash
+  // uniqueness on responses sent right back along the same path.
+  std::memcpy(reply_data, &sender_timestamp, 4);
+
+  if (payload[0] == REQ_TYPE_GET_STATUS) {
+    // Pack the same RepeaterStats struct shape MeshCore clients expect.
+    // Fields with no Linux equivalent (battery, MCU temp) are reported as 0.
+    struct __attribute__((packed)) RepeaterStats {
+      uint16_t batt_milli_volts;
+      uint16_t curr_tx_queue_len;
+      int16_t  noise_floor;
+      int16_t  last_rssi;
+      uint32_t n_packets_recv;
+      uint32_t n_packets_sent;
+      uint32_t total_air_time_secs;
+      uint32_t total_up_time_secs;
+      uint32_t n_sent_flood, n_sent_direct;
+      uint32_t n_recv_flood, n_recv_direct;
+      uint16_t err_events;
+      int16_t  last_snr;
+      uint16_t n_direct_dups, n_flood_dups;
+      uint32_t total_rx_air_time_secs;
+      uint32_t n_recv_errors;
+    } stats{};
+    stats.batt_milli_volts = _board ? _board->getBattMilliVolts() : 0;
+    stats.curr_tx_queue_len = _mgr ? _mgr->getOutboundTotal() : 0;
+    stats.noise_floor = (int16_t)_radio->getNoiseFloor();
+    stats.last_rssi   = (int16_t)_radio->getLastRSSI();
+    stats.n_packets_recv = _tcp_radio ? _tcp_radio->getRxCount() : 0;
+    stats.n_packets_sent = _tcp_radio ? _tcp_radio->getTxCount() : 0;
+    stats.total_air_time_secs = (uint32_t)(getTotalAirTime() / 1000);
+    stats.total_up_time_secs  = (uint32_t)(_ms->getMillis() / 1000);
+    stats.n_sent_flood  = getNumSentFlood();
+    stats.n_sent_direct = getNumSentDirect();
+    stats.n_recv_flood  = getNumRecvFlood();
+    stats.n_recv_direct = getNumRecvDirect();
+    stats.err_events    = 0;
+    stats.last_snr      = (int16_t)(_radio->getLastSNR() * 4);
+    auto* tables = (SimpleMeshTables*)getTables();
+    stats.n_direct_dups = tables ? tables->getNumDirectDups() : 0;
+    stats.n_flood_dups  = tables ? tables->getNumFloodDups()  : 0;
+    stats.total_rx_air_time_secs = (uint32_t)(getReceiveAirTime() / 1000);
+    stats.n_recv_errors = _tcp_radio ? _tcp_radio->getCrcErrors() : 0;
+    std::memcpy(&reply_data[4], &stats, sizeof(stats));
+    return 4 + (int)sizeof(stats);
+  }
+
+  if (payload[0] == REQ_TYPE_GET_TELEMETRY_DATA) {
+    // Linux has no battery / MCU temp / GPS sensors plumbed in. Return an
+    // empty CayenneLPP buffer (just the sender_timestamp tag). MeshCore
+    // clients handle a zero-length payload gracefully.
+    return 4;
+  }
+
+  if (payload[0] == REQ_TYPE_GET_ACCESS_LIST && sender->isAdmin()) {
+    if (payload[1] == 0 && payload[2] == 0) {
+      uint8_t ofs = 4;
+      for (int i = 0; i < acl.getNumClients()
+                      && ofs + 7 <= (uint8_t)(sizeof(reply_data) - 4); i++) {
+        auto c = acl.getClientByIdx(i);
+        if (c->permissions == 0) continue;
+        std::memcpy(&reply_data[ofs], c->id.pub_key, 6);
+        ofs += 6;
+        reply_data[ofs++] = c->permissions;
+      }
+      return ofs;
+    }
+  }
+
+  if (payload[0] == REQ_TYPE_GET_NEIGHBOURS) {
+    if (payload[1] != 0) return 0;   // request version
+    int reply_offset = 4;
+    uint8_t  count               = payload[2];
+    uint16_t offset;              std::memcpy(&offset, &payload[3], 2);
+    uint8_t  order_by            = payload[5];
+    uint8_t  pubkey_prefix_length = payload[6];
+    if (pubkey_prefix_length > PUB_KEY_SIZE) pubkey_prefix_length = PUB_KEY_SIZE;
+
+    int16_t neighbours_count = 0;
+#if MAX_NEIGHBOURS
+    NeighbourInfo* sorted[MAX_NEIGHBOURS];
+    for (int i = 0; i < MAX_NEIGHBOURS; i++) {
+      if (neighbours[i].heard_timestamp > 0) sorted[neighbours_count++] = &neighbours[i];
+    }
+    auto cmp_newest   = [](const NeighbourInfo* a, const NeighbourInfo* b)
+                          { return a->heard_timestamp > b->heard_timestamp; };
+    auto cmp_oldest   = [](const NeighbourInfo* a, const NeighbourInfo* b)
+                          { return a->heard_timestamp < b->heard_timestamp; };
+    auto cmp_stronger = [](const NeighbourInfo* a, const NeighbourInfo* b)
+                          { return a->snr > b->snr; };
+    auto cmp_weaker   = [](const NeighbourInfo* a, const NeighbourInfo* b)
+                          { return a->snr < b->snr; };
+    if      (order_by == 0) std::sort(sorted, sorted + neighbours_count, cmp_newest);
+    else if (order_by == 1) std::sort(sorted, sorted + neighbours_count, cmp_oldest);
+    else if (order_by == 2) std::sort(sorted, sorted + neighbours_count, cmp_stronger);
+    else if (order_by == 3) std::sort(sorted, sorted + neighbours_count, cmp_weaker);
+#endif
+
+    int results_count = 0, results_offset = 0;
+    uint8_t results_buffer[130];
+    for (int index = 0; index < count && index + offset < neighbours_count; index++) {
+      int entry_size = pubkey_prefix_length + 4 + 1;
+      if (results_offset + entry_size > (int)sizeof(results_buffer)) break;
+#if MAX_NEIGHBOURS
+      auto n = sorted[index + offset];
+      uint32_t heard_seconds_ago = getRTCClock()->getCurrentTime() - n->heard_timestamp;
+      std::memcpy(&results_buffer[results_offset], n->id.pub_key, pubkey_prefix_length);
+      results_offset += pubkey_prefix_length;
+      std::memcpy(&results_buffer[results_offset], &heard_seconds_ago, 4);
+      results_offset += 4;
+      std::memcpy(&results_buffer[results_offset], &n->snr, 1);
+      results_offset += 1;
+      results_count++;
+#endif
+    }
+    std::memcpy(&reply_data[reply_offset], &neighbours_count, 2); reply_offset += 2;
+    std::memcpy(&reply_data[reply_offset], &results_count,    2); reply_offset += 2;
+    std::memcpy(&reply_data[reply_offset], results_buffer, results_offset);
+    reply_offset += results_offset;
+    return reply_offset;
+  }
+
+  if (payload[0] == REQ_TYPE_GET_OWNER_INFO) {
+    std::snprintf((char*)&reply_data[4], sizeof(reply_data) - 4, "%s\n%s\n%s",
+                  FIRMWARE_VERSION, _prefs.node_name, _prefs.owner_info);
+    return 4 + (int)std::strlen((char*)&reply_data[4]);
+  }
+
+  return 0;   // unknown
+}
+
+void LinuxRepeaterMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt,
+                                        uint32_t delay_millis, uint8_t path_hash_size) {
+  if (scope.isNull()) {
+    sendFlood(pkt, delay_millis, path_hash_size);
+  } else {
+    uint16_t codes[2];
+    codes[0] = scope.calcTransportCode(pkt);
+    codes[1] = 0;
+    sendFlood(pkt, codes, delay_millis, path_hash_size);
+  }
+}
+
+void LinuxRepeaterMesh::sendFloodReply(mesh::Packet* packet, unsigned long delay_millis,
+                                       uint8_t path_hash_size) {
+  if (recv_pkt_region && !recv_pkt_region->isWildcard()) {
+    TransportKey scope;
+    if (region_map.getTransportKeysFor(*recv_pkt_region, &scope, 1) > 0) {
+      sendFloodScoped(scope, packet, delay_millis, path_hash_size);
+      return;
+    }
+  }
+  sendFlood(packet, delay_millis, path_hash_size);
+}
+
+void LinuxRepeaterMesh::onAnonDataRecv(mesh::Packet* packet, const uint8_t* secret,
+                                       const mesh::Identity& sender,
+                                       uint8_t* data, size_t len) {
+  if (packet->getPayloadType() != PAYLOAD_TYPE_ANON_REQ) return;
+
+  uint32_t timestamp;
+  std::memcpy(&timestamp, data, 4);
+  data[len] = 0;   // ensure null terminator for string compares
+
+  reply_path_len = -1;
+  uint8_t reply_len = 0;
+  if (data[4] == 0 || data[4] >= ' ') {
+    reply_len = handleLoginReq(sender, secret, timestamp, &data[4], packet->isRouteFlood());
+  } else if (data[4] == ANON_REQ_TYPE_REGIONS && packet->isRouteDirect()) {
+    reply_len = handleAnonRegionsReq(sender, timestamp, &data[5]);
+  } else if (data[4] == ANON_REQ_TYPE_OWNER && packet->isRouteDirect()) {
+    reply_len = handleAnonOwnerReq(sender, timestamp, &data[5]);
+  } else if (data[4] == ANON_REQ_TYPE_BASIC && packet->isRouteDirect()) {
+    reply_len = handleAnonClockReq(sender, timestamp, &data[5]);
+  }
+  if (reply_len == 0) return;
+
+  if (packet->isRouteFlood()) {
+    mesh::Packet* path = createPathReturn(sender, secret, packet->path, packet->path_len,
+                                          PAYLOAD_TYPE_RESPONSE, reply_data, reply_len);
+    if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+  } else if (reply_path_len < 0) {
+    mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret,
+                                         reply_data, reply_len);
+    if (reply) sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+  } else {
+    mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret,
+                                         reply_data, reply_len);
+    uint8_t path_len = ((reply_path_hash_size - 1) << 6) | (reply_path_len & 63);
+    if (reply) sendDirect(reply, reply_path, path_len, SERVER_RESPONSE_DELAY);
+  }
+}
+
+void LinuxRepeaterMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx,
+                                       const uint8_t* secret, uint8_t* data, size_t len) {
+  int i = matching_peer_indexes[sender_idx];
+  if (i < 0 || i >= acl.getNumClients()) return;
+  ClientInfo* client = acl.getClientByIdx(i);
+
+  if (type == PAYLOAD_TYPE_REQ) {
+    uint32_t timestamp;
+    std::memcpy(&timestamp, data, 4);
+    if (timestamp <= client->last_timestamp) return;   // replay
+
+    int reply_len = handleRequest(client, timestamp, &data[4], len - 4);
+    if (reply_len == 0) return;
+
+    client->last_timestamp = timestamp;
+    client->last_activity  = getRTCClock()->getCurrentTime();
+
+    if (packet->isRouteFlood()) {
+      mesh::Packet* path = createPathReturn(client->id, secret, packet->path,
+                                            packet->path_len, PAYLOAD_TYPE_RESPONSE,
+                                            reply_data, reply_len);
+      if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+    } else {
+      mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, client->id, secret,
+                                           reply_data, reply_len);
+      if (reply) {
+        if (client->out_path_len != OUT_PATH_UNKNOWN) {
+          sendDirect(reply, client->out_path, client->out_path_len, SERVER_RESPONSE_DELAY);
+        } else {
+          sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+        }
+      }
+    }
+    return;
+  }
+
+  if (type == PAYLOAD_TYPE_TXT_MSG && len > 5 && client->isAdmin()) {
+    // Admin client sent a CLI command over LoRa.
+    uint32_t sender_timestamp;
+    std::memcpy(&sender_timestamp, data, 4);
+    uint8_t flags = (data[4] >> 2);
+    if (!(flags == TXT_TYPE_PLAIN || flags == TXT_TYPE_CLI_DATA)) return;
+    if (sender_timestamp < client->last_timestamp) return;   // replay
+    bool is_retry = (sender_timestamp == client->last_timestamp);
+    client->last_timestamp = sender_timestamp;
+    client->last_activity  = getRTCClock()->getCurrentTime();
+    data[len] = 0;
+
+    if (flags == TXT_TYPE_PLAIN) {
+      // Legacy CLI: send an Ack so the client doesn't retransmit.
+      uint32_t ack_hash;
+      mesh::Utils::sha256((uint8_t*)&ack_hash, 4, data,
+                          5 + std::strlen((char*)&data[5]),
+                          client->id.pub_key, PUB_KEY_SIZE);
+      mesh::Packet* ack = createAck(ack_hash);
+      if (ack) {
+        if (client->out_path_len == OUT_PATH_UNKNOWN) {
+          sendFloodReply(ack, TXT_ACK_DELAY, packet->getPathHashSize());
+        } else {
+          sendDirect(ack, client->out_path, client->out_path_len, TXT_ACK_DELAY);
+        }
+      }
+    }
+
+    uint8_t temp[166];
+    char* command = (char*)&data[5];
+    char* reply   = (char*)&temp[5];
+    if (is_retry) {
+      *reply = 0;
+    } else {
+      processCommand(command, reply);
+    }
+    int text_len = (int)std::strlen(reply);
+    if (text_len > 0) {
+      uint32_t ts = getRTCClock()->getCurrentTimeUnique();
+      if (ts == sender_timestamp) ts++;   // ensure distinct timestamps
+      std::memcpy(temp, &ts, 4);
+      temp[4] = (TXT_TYPE_CLI_DATA << 2);
+      mesh::Packet* rep = createDatagram(PAYLOAD_TYPE_TXT_MSG, client->id, secret,
+                                         temp, 5 + text_len);
+      if (rep) {
+        if (client->out_path_len == OUT_PATH_UNKNOWN) {
+          sendFloodReply(rep, CLI_REPLY_DELAY_MILLIS, packet->getPathHashSize());
+        } else {
+          sendDirect(rep, client->out_path, client->out_path_len, CLI_REPLY_DELAY_MILLIS);
+        }
+      }
+    }
+  }
+}
+
+bool LinuxRepeaterMesh::onPeerPathRecv(mesh::Packet* /*packet*/, int sender_idx,
+                                       const uint8_t* /*secret*/, uint8_t* path,
+                                       uint8_t path_len, uint8_t /*extra_type*/,
+                                       uint8_t* /*extra*/, uint8_t /*extra_len*/) {
+  int i = matching_peer_indexes[sender_idx];
+  if (i >= 0 && i < acl.getNumClients()) {
+    auto client = acl.getClientByIdx(i);
+    client->out_path_len = mesh::Packet::copyPath(client->out_path, path, path_len);
+    client->last_activity = getRTCClock()->getCurrentTime();
+  }
+  return false;   // we do NOT send a reciprocal path back
+}
+
+void LinuxRepeaterMesh::onControlDataRecv(mesh::Packet* packet) {
+  uint8_t type = packet->payload[0] & 0xF0;
+  if (type == CTL_TYPE_NODE_DISCOVER_REQ && packet->payload_len >= 6
+      && !_prefs.disable_fwd
+      && discover_limiter.allow(getRTCClock()->getCurrentTime())) {
+    int i = 1;
+    uint8_t  filter = packet->payload[i++];
+    uint32_t tag;   std::memcpy(&tag, &packet->payload[i], 4); i += 4;
+    uint32_t since = 0;
+    if (packet->payload_len >= (size_t)(i + 4)) std::memcpy(&since, &packet->payload[i], 4);
+
+    if ((filter & (1 << ADV_TYPE_REPEATER))
+        && _prefs.discovery_mod_timestamp >= since) {
+      bool prefix_only = packet->payload[0] & 1;
+      uint8_t data[6 + PUB_KEY_SIZE];
+      data[0] = CTL_TYPE_NODE_DISCOVER_RESP | ADV_TYPE_REPEATER;
+      data[1] = packet->_snr;
+      std::memcpy(&data[2], &tag, 4);
+      std::memcpy(&data[6], self_id.pub_key, PUB_KEY_SIZE);
+      auto resp = createControlData(data, prefix_only ? 6 + 8 : 6 + PUB_KEY_SIZE);
+      if (resp) sendZeroHop(resp, getRetransmitDelay(resp) * 4);
+    }
+    return;
+  }
+  if (type == CTL_TYPE_NODE_DISCOVER_RESP && packet->payload_len >= 6) {
+    uint8_t node_type = packet->payload[0] & 0x0F;
+    if (node_type != ADV_TYPE_REPEATER) return;
+    if (packet->payload_len < 6 + PUB_KEY_SIZE) return;
+    if (pending_discover_tag == 0 || millisHasNowPassed(pending_discover_until)) {
+      pending_discover_tag = 0;
+      return;
+    }
+    uint32_t tag;
+    std::memcpy(&tag, &packet->payload[2], 4);
+    if (tag != pending_discover_tag) return;
+
+    mesh::Identity id(&packet->payload[6]);
+    if (id.matches(self_id)) return;
+    putNeighbour(id, getRTCClock()->getCurrentTime(), packet->getSNR());
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Packet log — append-mode plain text in /var/log/Meshcore-Linux/packets.log.
+// ════════════════════════════════════════════════════════════════════════
+
+static void ensureDirFor(const std::string& path) {
+  size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos) return;
+  std::string dir = path.substr(0, slash);
+  // mkdir -p, ignore EEXIST silently.
+  ::mkdir(dir.c_str(), 0755);
+}
+
+void LinuxRepeaterMesh::eraseLogFile() {
+  std::remove(_log_path.c_str());
+}
+
+void LinuxRepeaterMesh::dumpLogFile() {
+  // CommonCLI invokes this when `log dump` runs from CLI; on MeshCore the
+  // upstream implementation streams the file over the Serial CLI. We don't
+  // have a direct way to stream into the caller's reply buffer here (the
+  // CommonCLI dump uses its own line writer), so log to stderr — operators
+  // can `journalctl -u Meshcore-Linux` to read.
+  FILE* f = std::fopen(_log_path.c_str(), "r");
+  if (!f) {
+    std::fprintf(stderr, "[repeater] dumpLogFile: cannot open %s\n", _log_path.c_str());
+    return;
+  }
+  char line[256];
+  std::fprintf(stderr, "[repeater] ── %s dump begin ──\n", _log_path.c_str());
+  while (std::fgets(line, sizeof(line), f)) std::fputs(line, stderr);
+  std::fprintf(stderr, "[repeater] ── %s dump end ──\n", _log_path.c_str());
+  std::fclose(f);
+}
+
+void LinuxRepeaterMesh::logTextLine(const char* prefix, mesh::Packet* pkt, int len,
+                                    float score) {
+  if (!_logging || _log_path.empty()) return;
+  ensureDirFor(_log_path);
+  FILE* f = std::fopen(_log_path.c_str(), "a");
+  if (!f) return;
+  time_t now = std::time(nullptr);
+  char tbuf[32];
+  std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+  std::fprintf(f, "%s %s len=%d type=%d route=%s payload_len=%d",
+               tbuf, prefix, len, pkt->getPayloadType(),
+               pkt->isRouteDirect() ? "D" : "F", pkt->payload_len);
+  if (score >= 0) {
+    std::fprintf(f, " snr=%d rssi=%d score=%d",
+                 (int)_radio->getLastSNR(), (int)_radio->getLastRSSI(),
+                 (int)(score * 1000));
+  }
+  uint8_t pt = pkt->getPayloadType();
+  if (pt == PAYLOAD_TYPE_PATH || pt == PAYLOAD_TYPE_REQ
+      || pt == PAYLOAD_TYPE_RESPONSE || pt == PAYLOAD_TYPE_TXT_MSG) {
+    std::fprintf(f, " [%02X->%02X]", pkt->payload[1], pkt->payload[0]);
+  }
+  std::fputc('\n', f);
+  std::fclose(f);
+}
+
+void LinuxRepeaterMesh::logRx(mesh::Packet* pkt, int len, float score) {
+  logTextLine("RX", pkt, len, score);
+}
+void LinuxRepeaterMesh::logTx(mesh::Packet* pkt, int len) {
+  logTextLine("TX", pkt, len, -1.0f);
+}
+void LinuxRepeaterMesh::logTxFail(mesh::Packet* pkt, int len) {
+  logTextLine("TX-FAIL", pkt, len, -1.0f);
 }

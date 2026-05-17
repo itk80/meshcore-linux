@@ -14,14 +14,20 @@
 //   /acl                       ClientACL persistence
 //   /regions                   RegionMap persistence
 //
+// Packet log lives inside the state dir at /var/lib/Meshcore-Linux/packets.log
+// (configurable via setPacketLogPath). Operators can plug logrotate against
+// that path.
+//
 // CLI commands are bridged via processCommand(cmd, reply) — meant to be
-// called from the HTTP /api/command endpoint (and could be wired to stdin
-// or a unix-socket fronted CLI in a follow-up).
+// called from the HTTP /api/command endpoint AND from over-air TXT (admin
+// clients via onPeerDataRecv).
 
 #include <Mesh.h>
+#include <cstdio>
 #include <functional>
 #include <string>
-#include "LinuxTcpRadio.h"   // for hot-applying radio params via setLoRaParams/setEndpoint
+#include "LinuxTcpRadio.h"
+#include "RateLimiter.h"
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
 #include <helpers/CommonCLI.h>
@@ -34,6 +40,9 @@
 
 #ifndef MAX_NEIGHBOURS
   #define MAX_NEIGHBOURS  32
+#endif
+#ifndef MAX_CLIENTS
+  #define MAX_CLIENTS     32
 #endif
 #ifndef FIRMWARE_VERSION
   #define FIRMWARE_VERSION  "v0.1.0-linux"
@@ -57,12 +66,6 @@ public:
                     mesh::RTCClock& rtc, mesh::PacketManager& mgr,
                     mesh::MeshTables& tables);
 
-  // Bring up persistence + run mesh::Mesh::begin (which kicks Dispatcher).
-  // `identity_pub_hex` / `identity_prv_hex` come from /etc/Meshcore-Linux/
-  // config.json. If either is empty the function generates a fresh keypair
-  // via the host RNG and calls `onIdentityGenerated(pubhex, prvhex)` so the
-  // caller can persist it back to the config file. NEVER returns / sends
-  // anything with a zero key.
   using OnIdentityGenerated = std::function<void(const std::string& pub_hex,
                                                   const std::string& prv_hex)>;
   void bringUp(FILESYSTEM& fs,
@@ -70,17 +73,16 @@ public:
                const std::string& identity_prv_hex,
                OnIdentityGenerated on_generated);
 
-  // Seed NodePrefs from the JSON config when persistence is empty (first
-  // boot). Idempotent: existing _prefs.password/name/lat/lon are NOT
-  // overwritten if loadPrefs already restored them. Called by main.cpp
-  // right after bringUp().
   void seedPrefsFromConfig(const std::string& name,
                            double lat, double lon,
                            const std::string& admin_password,
                            const std::string& guest_password);
 
-  // Bridge CLI command (called from HTTP /api/command). Returns nothing —
-  // reply text goes into `reply` (caller must provide at least 160 B).
+  // Where logRx/logTx/logTxFail append entries when _logging is true.
+  // Defaults to /var/log/Meshcore-Linux/packets.log. The log file is
+  // truncated by `eraseLogFile()` (called via CLI `log erase`).
+  void setPacketLogPath(const std::string& path) { _log_path = path; }
+
   void processCommand(const char* command, char* reply);
 
   NodePrefs* getNodePrefs() { return &_prefs; }
@@ -96,9 +98,30 @@ public:
   uint32_t getDirectRetransmitDelay(const mesh::Packet* packet) override;
 
   bool allowPacketForward(const mesh::Packet* packet) override;
+  bool filterRecvFloodPacket(mesh::Packet* pkt) override;
+
   void onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id,
                     uint32_t timestamp, const uint8_t* app_data,
                     size_t app_data_len) override;
+
+  // Remote-management surface (admin clients reach us over LoRa via these).
+  int  searchPeersByHash(const uint8_t* hash) override;
+  void getPeerSharedSecret(uint8_t* dest_secret, int peer_idx) override;
+  void onAnonDataRecv(mesh::Packet* packet, const uint8_t* secret,
+                      const mesh::Identity& sender, uint8_t* data,
+                      size_t len) override;
+  void onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender_idx,
+                      const uint8_t* secret, uint8_t* data, size_t len) override;
+  bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret,
+                      uint8_t* path, uint8_t path_len, uint8_t extra_type,
+                      uint8_t* extra, uint8_t extra_len) override;
+  void onControlDataRecv(mesh::Packet* packet) override;
+
+  // Packet log hooks — write timestamped one-line entries to _log_path
+  // when _logging is true.
+  void logRx(mesh::Packet* pkt, int len, float score) override;
+  void logTx(mesh::Packet* pkt, int len) override;
+  void logTxFail(mesh::Packet* pkt, int len) override;
 
   // ── CommonCLICallbacks (override) ──────────────────────────────────
   void  savePrefs() override { _cli.savePrefs(_fs); }
@@ -110,8 +133,8 @@ public:
   void  updateAdvertTimer() override;
   void  updateFloodAdvertTimer() override;
   void  setLoggingOn(bool enable) override { _logging = enable; }
-  void  eraseLogFile() override {}
-  void  dumpLogFile() override {}
+  void  eraseLogFile() override;
+  void  dumpLogFile() override;
   void  setTxPower(int8_t power_dbm) override;
   void  formatNeighborsReply(char* reply) override;
   void  formatStatsReply(char* reply) override;
@@ -123,28 +146,64 @@ public:
   void  applyTempRadioParams(float freq, float bw, uint8_t sf, uint8_t cr,
                              int timeout_mins) override;
 
-  // ── Periodic tick — call from main loop, handles advert timers etc. ─
+  // Periodic tick — call from main loop (drives Dispatcher + advert timers).
   void tick();
 
 private:
-  mesh::MainBoard* _board;
-  LinuxTcpRadio*   _tcp_radio;
-  FILESYSTEM*      _fs;
-  NodePrefs        _prefs;
-  ClientACL        acl;
-  RegionMap        region_map;
-  TransportKeyStore key_store;
-  SensorManager    sensors;
-  CommonCLI        _cli;
+  // ── Over-air request handlers (port of MyMesh) ─────────────────────
+  uint8_t handleLoginReq(const mesh::Identity& sender, const uint8_t* secret,
+                         uint32_t sender_timestamp, const uint8_t* data,
+                         bool is_flood);
+  uint8_t handleAnonRegionsReq(const mesh::Identity& sender,
+                               uint32_t sender_timestamp, const uint8_t* data);
+  uint8_t handleAnonOwnerReq  (const mesh::Identity& sender,
+                               uint32_t sender_timestamp, const uint8_t* data);
+  uint8_t handleAnonClockReq  (const mesh::Identity& sender,
+                               uint32_t sender_timestamp, const uint8_t* data);
+  int  handleRequest(ClientInfo* sender, uint32_t sender_timestamp,
+                     uint8_t* payload, size_t payload_len);
 
-  bool             _logging;
-  unsigned long    next_local_advert;
-  unsigned long    next_flood_advert;
+  // ── Helpers ────────────────────────────────────────────────────────
+  void sendFloodReply  (mesh::Packet* packet, unsigned long delay_millis,
+                        uint8_t path_hash_size);
+  void sendFloodScoped (const TransportKey& scope, mesh::Packet* pkt,
+                        uint32_t delay_millis, uint8_t path_hash_size);
+  bool isLooped(const mesh::Packet* packet, const uint8_t max_counters[]);
+  mesh::Packet* createSelfAdvert();
+  void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
+  void logTextLine  (const char* prefix, mesh::Packet* pkt, int len, float score);
+
+  // ── State ──────────────────────────────────────────────────────────
+  mesh::MainBoard*  _board;
+  LinuxTcpRadio*    _tcp_radio;
+  FILESYSTEM*       _fs;
+  NodePrefs         _prefs;
+  ClientACL         acl;
+  RegionMap         region_map;
+  TransportKeyStore key_store;
+  SensorManager     sensors;
+  CommonCLI         _cli;
+
+  bool          _logging;
+  std::string   _log_path;
+  unsigned long next_local_advert;
+  unsigned long next_flood_advert;
+  unsigned long dirty_contacts_expiry;
+
+  // Reply scratch (one-at-a-time — Mesh::onPeerDataRecv is serialised).
+  uint8_t  reply_data[MAX_PACKET_PAYLOAD];
+  uint8_t  reply_path[MAX_PATH_SIZE];
+  int8_t   reply_path_len;
+  uint8_t  reply_path_hash_size;
+
+  int      matching_peer_indexes[MAX_CLIENTS];
+  RegionEntry* recv_pkt_region;
+  RateLimiter  anon_limiter;
+  RateLimiter  discover_limiter;
+  uint32_t     pending_discover_tag;
+  unsigned long pending_discover_until;
 
 #if MAX_NEIGHBOURS
   NeighbourInfo    neighbours[MAX_NEIGHBOURS];
 #endif
-
-  mesh::Packet* createSelfAdvert();
-  void putNeighbour(const mesh::Identity& id, uint32_t timestamp, float snr);
 };
