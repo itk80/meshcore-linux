@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/meshcore-linux /etc/Meshcore-Linux/config.json
+ExecStart=/usr/sbin/meshcore-linux /etc/Meshcore-Linux/config.json
 # `always` (not on-failure) so that intentional clean exits — operator
 # clicking Reboot in the UI, `reboot` CLI verb, LinuxMainBoard::reboot()
 # — also bring the service back automatically. exit(0) is how the binary

@@ -16,7 +16,9 @@ BIN_SRC="$ROOT/meshcore-linux"
 UNIT_SRC="$ROOT/systemd/Meshcore-Linux.service"
 CFG_SRC="$ROOT/config/config.example.json"
 
-BIN_DST=/usr/local/bin/meshcore-linux
+# Match the .deb path so the shared systemd unit's ExecStart=/usr/sbin/
+# meshcore-linux works for both manual and packaged installs.
+BIN_DST=/usr/sbin/meshcore-linux
 UNIT_DST=/etc/systemd/system/Meshcore-Linux.service
 CFG_DIR=/etc/Meshcore-Linux
 CFG_DST="$CFG_DIR/config.json"

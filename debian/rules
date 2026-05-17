@@ -14,10 +14,14 @@ override_dh_auto_build:
 	$(MAKE)
 
 override_dh_auto_install:
-	# No-op — dh_install reads debian/install and copies files into
-	# debian/meshcore-linux/ for us. Override exists only to suppress
-	# the default `make install` which our Makefile doesn't implement.
-	:
+	# Default `make install` doesn't exist in our Makefile, so suppress
+	# it. dh_install handles regular file placement from debian/install.
+	# Conffile placement is done here because we need to RENAME the
+	# example into the live config path:
+	#   /usr/share/meshcore-linux/config.example.json (template, always shipped)
+	#   /etc/Meshcore-Linux/config.json                (conffile, never overwritten on upgrade)
+	install -D -m 0640 config/config.example.json \
+	        debian/meshcore-linux/etc/Meshcore-Linux/config.json
 
 override_dh_auto_clean:
 	-$(MAKE) clean

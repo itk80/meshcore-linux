@@ -10,17 +10,24 @@
 # references the upstream tree in place.
 
 CXX      ?= g++
-CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter \
-            -Wno-reorder-ctor -Wno-unused-result -Wno-sign-compare \
-            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
-            -DMAX_CLIENTS=32 -DMAX_NEIGHBOURS=32 \
-            -include cstddef -include cstdint -include cstring -include cstdio \
-            -include shims/Arduino.h -include shims/FS.h \
-            -Ishims \
-            -Ithird_party \
-            -I../MeshCore/src \
-            -I../MeshCore/lib/ed25519 \
-            -I../MeshCore/.pio/libdeps/Heltec_v3_repeater/Crypto
+CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra
+
+# MANDATORY flags must survive whatever CXXFLAGS the environment passes
+# (dpkg-buildpackage overrides CXXFLAGS with hardening defaults and would
+# otherwise strip our -include shims/Arduino.h, which the Arduino-API
+# upstream sources cannot compile without). Always appended via `override`.
+override CXXFLAGS += \
+    -Wno-unused-parameter -Wno-reorder-ctor -Wno-unused-result -Wno-sign-compare \
+    -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+    -DMAX_CLIENTS=32 -DMAX_NEIGHBOURS=32 \
+    -include cstddef -include cstdint -include cstring -include cstdio \
+    -include shims/Arduino.h -include shims/FS.h \
+    -Ishims \
+    -Ithird_party \
+    -I../MeshCore/src \
+    -I../MeshCore/lib/ed25519 \
+    -I../MeshCore/.pio/libdeps/Heltec_v3_repeater/Crypto
+
 LDFLAGS  ?= -pthread
 
 # ── Our own source ───────────────────────────────────────────────────
