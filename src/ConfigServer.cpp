@@ -601,8 +601,17 @@ void ConfigServer::route(httplib::Server& s) {
   });
 
   s.Get("/api/config", [this](const httplib::Request&, httplib::Response& res) {
-    std::lock_guard<std::mutex> lk(_config_mu);
-    res.set_content(_live_config.dump(2), "application/json");
+    // Start from on-disk config (modem endpoint, identity, anything not in
+    // _prefs). Then let the live-overlay callback (wired in main.cpp) refresh
+    // node/lora/repeater scalars from current NodePrefs — so values changed
+    // via CLI bridge OR over LoRa from the mobile app show up here.
+    nlohmann::json out;
+    {
+      std::lock_guard<std::mutex> lk(_config_mu);
+      out = _live_config;
+    }
+    if (_live_overlay) _live_overlay(out);
+    res.set_content(out.dump(2), "application/json");
   });
 
   s.Post("/api/config", [this](const httplib::Request& req, httplib::Response& res) {

@@ -87,6 +87,29 @@ public:
 
   NodePrefs* getNodePrefs() { return &_prefs; }
 
+  // Snapshot live NodePrefs + identity into config-schema scalars. ConfigServer
+  // overlays this on top of its on-disk config so GET /api/config reflects
+  // whatever the operator changed via CLI / mobile app since last persist.
+  struct LiveSnapshot {
+    std::string node_name, owner_info, admin_password, guest_password;
+    double node_lat = 0, node_lon = 0;
+    float  freq_mhz = 0, bw_khz = 0;
+    uint8_t sf = 0, cr = 0;
+    int8_t  tx_power_dbm = 0;
+    uint8_t advert_interval_min = 0;
+    uint8_t flood_advert_interval_h = 0;
+    uint8_t flood_max_hops = 0;
+    uint8_t duty_cycle_pct = 0;
+    int8_t  interference_threshold = 0;
+    uint8_t agc_reset_interval = 0;
+    float   rx_delay_base = 0, tx_delay_factor = 0, direct_tx_delay_factor = 0;
+    uint8_t multi_acks = 0;
+    uint8_t loop_detect = 0;       // 0=off 1=minimal 2=moderate 3=strict
+    uint8_t path_hash_mode = 0;
+    std::string identity_pub_hex, identity_prv_hex;
+  };
+  void snapshotLivePrefs(LiveSnapshot& out) const;
+
   // ── mesh::Mesh / Dispatcher hooks (override) ───────────────────────
   float getAirtimeBudgetFactor() const override { return _prefs.airtime_factor; }
   int   getInterferenceThreshold() const override { return _prefs.interference_threshold; }

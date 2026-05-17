@@ -182,6 +182,43 @@ int main(int argc, char** argv) {
     mesh.processCommand(cmd.c_str(), reply);
     return std::string(reply);
   });
+  // GET /api/config overlay — refresh node/lora/repeater scalars from current
+  // NodePrefs so the configurator UI shows whatever was last set via CLI or
+  // over LoRa from a mobile admin client.
+  api.setLiveOverlay([&mesh, &mesh_mu](nlohmann::json& cfg) {
+    LinuxRepeaterMesh::LiveSnapshot s;
+    {
+      std::lock_guard<std::mutex> lk(mesh_mu);
+      mesh.snapshotLivePrefs(s);
+    }
+    cfg["node"]["name"]            = s.node_name;
+    cfg["node"]["lat"]             = s.node_lat;
+    cfg["node"]["lon"]             = s.node_lon;
+    cfg["node"]["admin_password"]  = s.admin_password;
+    cfg["node"]["guest_password"]  = s.guest_password;
+    cfg["node"]["owner_info"]      = s.owner_info;
+    cfg["lora"]["freq_mhz"]        = s.freq_mhz;
+    cfg["lora"]["bw_khz"]          = s.bw_khz;
+    cfg["lora"]["sf"]              = s.sf;
+    cfg["lora"]["cr"]              = s.cr;
+    cfg["lora"]["tx_power_dbm"]    = s.tx_power_dbm;
+    cfg["repeater"]["advert_interval_min"]      = s.advert_interval_min;
+    cfg["repeater"]["flood_advert_interval_h"]  = s.flood_advert_interval_h;
+    cfg["repeater"]["flood_max_hops"]           = s.flood_max_hops;
+    cfg["repeater"]["duty_cycle_pct"]           = s.duty_cycle_pct;
+    cfg["repeater"]["interference_threshold"]   = s.interference_threshold;
+    cfg["repeater"]["agc_reset_interval"]       = s.agc_reset_interval;
+    cfg["repeater"]["rx_delay_base"]            = s.rx_delay_base;
+    cfg["repeater"]["tx_delay_factor"]          = s.tx_delay_factor;
+    cfg["repeater"]["direct_tx_delay_factor"]   = s.direct_tx_delay_factor;
+    cfg["repeater"]["multi_acks"]               = (bool)s.multi_acks;
+    cfg["repeater"]["path_hash_mode"]           = s.path_hash_mode;
+    static const char* LOOP_NAMES[] = {"off","minimal","moderate","strict"};
+    cfg["repeater"]["loop_detect"]              = LOOP_NAMES[std::min<uint8_t>(s.loop_detect, 3)];
+    // Identity pub only — we never expose prv over HTTP (operator can read
+    // /etc/Meshcore-Linux/config.json directly if they need to back it up).
+    cfg["identity"]["pub"]                      = s.identity_pub_hex;
+  });
   if (!api.start(api_bind, (uint16_t)api_port)) {
     LOGW("config API failed to bind %s:%d", api_bind.c_str(), api_port);
   } else {

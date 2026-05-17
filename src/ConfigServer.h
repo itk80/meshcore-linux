@@ -44,12 +44,19 @@ public:
   using CliBridge = std::function<std::string(const std::string&)>;
   void setCliBridge(CliBridge fn) { _cli_bridge = std::move(fn); }
 
+  // Live-overlay getter — when set, GET /api/config calls this callback to
+  // pull current NodePrefs into the response. Caller is responsible for
+  // serialising against the main mesh loop (mesh_mu in main.cpp).
+  using LiveOverlay = std::function<void(nlohmann::json&)>;
+  void setLiveOverlay(LiveOverlay fn) { _live_overlay = std::move(fn); }
+
 private:
   LinuxTcpRadio&     _radio;
   nlohmann::json&    _live_config;     // mutable, shared with main
   std::mutex&        _config_mu;       // guards reads/writes of _live_config
   std::string        _config_path;     // /etc/Meshcore-Linux/config.json
   CliBridge          _cli_bridge;      // optional /api/command bridge
+  LiveOverlay        _live_overlay;    // optional GET /api/config overlay
 
   std::unique_ptr<httplib::Server> _server;
   std::thread        _thread;

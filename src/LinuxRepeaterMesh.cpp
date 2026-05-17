@@ -525,6 +525,43 @@ void LinuxRepeaterMesh::processCommand(const char* command, char* reply) {
 
 // ── Periodic tick ─────────────────────────────────────────────────────
 
+void LinuxRepeaterMesh::snapshotLivePrefs(LiveSnapshot& out) const {
+  out.node_name      = _prefs.node_name;
+  out.owner_info     = _prefs.owner_info;
+  out.admin_password = _prefs.password;
+  out.guest_password = _prefs.guest_password;
+  out.node_lat       = _prefs.node_lat;
+  out.node_lon       = _prefs.node_lon;
+  out.freq_mhz       = _prefs.freq;
+  out.bw_khz         = _prefs.bw;
+  out.sf             = _prefs.sf;
+  out.cr             = _prefs.cr;
+  out.tx_power_dbm   = _prefs.tx_power_dbm;
+  out.advert_interval_min     = _prefs.advert_interval;
+  out.flood_advert_interval_h = _prefs.flood_advert_interval;
+  out.flood_max_hops          = _prefs.flood_max;
+  // CommonCLI's `set dutycycle N` stores airtime_factor as N/100 (1.0 = 100%).
+  out.duty_cycle_pct          = (uint8_t)std::round(_prefs.airtime_factor * 100.0f);
+  out.interference_threshold  = _prefs.interference_threshold;
+  out.agc_reset_interval      = _prefs.agc_reset_interval;
+  out.rx_delay_base           = _prefs.rx_delay_base;
+  out.tx_delay_factor         = _prefs.tx_delay_factor;
+  out.direct_tx_delay_factor  = _prefs.direct_tx_delay_factor;
+  out.multi_acks              = _prefs.multi_acks;
+  out.loop_detect             = _prefs.loop_detect;
+  out.path_hash_mode          = _prefs.path_hash_mode;
+  // Public key only — prv stays in /etc/Meshcore-Linux/config.json (mode 0600
+  // ideally) and is never sent over the HTTP overlay. Operators who need to
+  // back it up read the config file directly.
+  static const char* hex = "0123456789abcdef";
+  out.identity_pub_hex.resize(PUB_KEY_SIZE * 2);
+  for (size_t i = 0; i < PUB_KEY_SIZE; i++) {
+    out.identity_pub_hex[i*2]     = hex[self_id.pub_key[i] >> 4];
+    out.identity_pub_hex[i*2 + 1] = hex[self_id.pub_key[i] & 0x0F];
+  }
+  out.identity_prv_hex.clear();
+}
+
 void LinuxRepeaterMesh::tick() {
   mesh::Mesh::loop();   // drives Dispatcher (radio.loop / recv / send)
 
@@ -901,6 +938,12 @@ void LinuxRepeaterMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int s
     uint32_t sender_timestamp;
     std::memcpy(&sender_timestamp, data, 4);
     uint8_t flags = (data[4] >> 2);
+    // Log raw incoming so we can debug what the mobile app sends.
+    data[len] = 0;
+    fprintf(stderr, "[peer-txt] from=%02X%02X%02X%02X len=%zu flags=%u cmd='%s'\n",
+            client->id.pub_key[0], client->id.pub_key[1],
+            client->id.pub_key[2], client->id.pub_key[3],
+            len, flags, (const char*)&data[5]);
     if (!(flags == TXT_TYPE_PLAIN || flags == TXT_TYPE_CLI_DATA)) return;
     if (sender_timestamp < client->last_timestamp) return;   // replay
     bool is_retry = (sender_timestamp == client->last_timestamp);
